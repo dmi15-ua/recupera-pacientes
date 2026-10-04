@@ -129,10 +129,26 @@ schema `rp_test`, que borran entero; nunca tocan `rp`.
    precio, horario, preguntas frecuentes (seguros, parking, financiación…) y cómo debe hablar el asistente.
 2. Te llega un aviso por Telegram. En `/admin → Fichas de alta` ves la ficha y **lo que leerá el
    asistente**. Pulsa *Crear clínica*: se crea inactiva y con su código para el panel de recepción.
-3. Conecta su WhatsApp y pon el `wa_phone_number_id` en Supabase (*Table Editor → schema `rp` →
-   `clinics`*). Desde ahí puedes retocar precios, horario o instrucciones cuando quieras: se aplica al momento.
+3. Conecta su WhatsApp en Meta y, en `/admin → Clínicas → Editar`, pon su **Phone number ID**.
+   Desde ahí cambias también los teléfonos, el horario, los precios y las instrucciones cuando quieras:
+   se aplica al momento.
 4. En `/admin → Clínicas`, *Activar*. El dashboard muestra por clínica las llamadas perdidas,
    los WhatsApp enviados, las conversaciones y las citas pedidas de los últimos 30 días.
+
+## Un número de WhatsApp por clínica
+
+Cada clínica envía y recibe desde su propio número (`wa_phone_number_id`). El token de Meta:
+
+- **Por defecto**, `WA_TOKEN` para todas: vale cuando los números están en cuentas de WhatsApp
+  Business a las que tu app de Meta tiene acceso (lo normal si das de alta a las clínicas como
+  proveedor tecnológico con el registro integrado de Meta).
+- **Token propio** (`/admin → Editar → Token de acceso`) si una clínica conecta su número con su
+  propia cuenta de Meta. Se guarda en la base de datos y nunca se vuelve a mostrar entero.
+
+La plantilla `llamada_perdida` hay que crearla y aprobarla **en la cuenta de WhatsApp Business de
+cada clínica**: las plantillas no se comparten entre cuentas.
+
+El simulador de `/admin` nunca envía nada a Meta, aunque la clínica tenga token.
 
 ## Estructura
 

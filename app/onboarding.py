@@ -29,6 +29,22 @@ FAQ_LABELS = {
 _RANGE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-4]):[0-5]\d$")
 
 
+def clean_range(r: str) -> str:
+    r = r.replace(" ", "").replace(".", ":")
+    if not _RANGE.match(r):
+        raise ValueError(f"Horario no válido: {r} (usa 09:00-14:00)")
+    return r
+
+
+def clean_horario(v: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    clean: Dict[str, List[str]] = {}
+    for day, ranges in v.items():
+        if day not in DAYS:
+            raise ValueError(f"Día no válido: {day}")
+        clean[day] = [clean_range(r) for r in ranges[:4]]
+    return clean
+
+
 class Servicio(BaseModel):
     servicio: str = Field(..., min_length=1, max_length=120)
     precio: str = Field("", max_length=60)
@@ -58,18 +74,7 @@ class ApplicationIn(BaseModel):
     @field_validator("horario")
     @classmethod
     def _check_horario(cls, v: Dict[str, List[str]]) -> Dict[str, List[str]]:
-        clean: Dict[str, List[str]] = {}
-        for day, ranges in v.items():
-            if day not in DAYS:
-                raise ValueError(f"Día no válido: {day}")
-            out = []
-            for r in ranges[:4]:
-                r = r.replace(" ", "").replace(".", ":")
-                if not _RANGE.match(r):
-                    raise ValueError(f"Horario no válido: {r} (usa 09:00-14:00)")
-                out.append(r)
-            clean[day] = out
-        return clean
+        return clean_horario(v)
 
     @field_validator("faq")
     @classmethod

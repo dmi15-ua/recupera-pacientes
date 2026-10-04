@@ -96,6 +96,7 @@ async def process_missed_call(db: Database, call: Dict[str, Any], t: int, simula
         clinic.get("wa_phone_number_id", ""), phone,
         tpl.get("nombre", "llamada_perdida"), tpl.get("idioma", "es"),
         [clinic["nombre"]] if tpl.get("con_nombre_clinica", True) else [],
+        token=clinic.get("wa_token"),
     )
     if not res.ok:
         db.set_missed_status(call["id"], "fallido", res.error)
@@ -117,10 +118,10 @@ async def _ask_callback(db: Database, clinic: Dict[str, Any], phone: str, reason
 
 
 # ------------------------------------------------------------- mensajes entrantes
-async def _transcribe(media_id: str, mime: str) -> Optional[str]:
+async def _transcribe(media_id: str, mime: str, token: Optional[str] = None) -> Optional[str]:
     if not settings.transcribe_audio:
         return None
-    audio = await whatsapp.download_media(media_id)
+    audio = await whatsapp.download_media(media_id, token)
     if not audio:
         return None
     mime = (mime or "audio/ogg").split(";")[0]
@@ -160,7 +161,7 @@ async def handle_inbound(db: Database, agent: Agent, ev: Inbound,
 
     text = ev.text
     if not text and ev.media_type == "audio" and ev.media_id:
-        transcript = await _transcribe(ev.media_id, ev.media_mime)
+        transcript = await _transcribe(ev.media_id, ev.media_mime, clinic.get("wa_token"))
         text = f"(nota de voz) {transcript}" if transcript else None
     if not text:
         db.add_message(conv["id"], "patient", f"[{ev.media_type or 'mensaje'} sin texto]", wa_id=ev.wa_id)
@@ -210,7 +211,8 @@ async def _handle_status(db: Database, clinic: Dict[str, Any], ev: Inbound) -> s
 
 
 async def _reply_fixed(db: Database, clinic: Dict[str, Any], conv: Dict[str, Any], text: str) -> None:
-    res = await whatsapp.send_text(clinic.get("wa_phone_number_id", ""), conv["phone"], text)
+    res = await whatsapp.send_text(clinic.get("wa_phone_number_id", ""), conv["phone"], text,
+                                   token=clinic.get("wa_token"))
     db.add_message(conv["id"], "bot", text, wa_id=res.wa_id if res.ok else None)
 
 

@@ -23,7 +23,7 @@ from app.config import settings
 from app.db import Database, now
 from app.notify import notify_owner
 from app.phone import normalize
-from app.whatsapp import parse_webhook, verify_signature, whatsapp
+from app.whatsapp import SIMULATING, parse_webhook, verify_signature, whatsapp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 # httpx registra cada URL a nivel INFO; no aporta y llena el log.
@@ -360,6 +360,127 @@ def admin_clinic_active(clinic_id: str, body: ActiveIn, request: Request, author
     return {"ok": True}
 
 
+EDITABLE = ("nombre", "asistente", "zona_horaria", "wa_phone_number_id", "numeros_llamada",
+            "telefono_recepcion", "segundos_espera", "horario", "envio_permitido", "informacion",
+            "instrucciones", "mensaje_voz", "telegram_chat_id", "bloqueados")
+
+
+class ClinicEditIn(BaseModel):
+    nombre: str = Field(..., min_length=2, max_length=160)
+    asistente: Optional[str] = Field(None, max_length=40)
+    zona_horaria: str = Field("Europe/Madrid", max_length=60)
+    wa_phone_number_id: Optional[str] = Field(None, max_length=40, pattern=r"^\d*$")
+    # Vacío = no se toca el token guardado. Para quitarlo, borrar_wa_token.
+    wa_token: Optional[str] = Field(None, max_length=1000)
+    borrar_wa_token: bool = False
+    numeros_llamada: List[str] = Field(default_factory=list, max_length=10)
+    telefono_recepcion: Optional[str] = Field(None, max_length=30)
+    segundos_espera: int = Field(20, ge=5, le=60)
+    horario: Dict[str, List[str]] = Field(default_factory=dict)
+    envio_permitido: str = "09:00-21:00"
+    plantilla_nombre: str = Field("llamada_perdida", pattern=r"^[a-z0-9_]{1,512}$")
+    plantilla_idioma: str = Field("es", pattern=r"^[a-z]{2}(_[A-Z]{2})?$")
+    informacion: str = Field("", max_length=8000)
+    instrucciones: str = Field("", max_length=4000)
+    mensaje_voz: Optional[str] = Field(None, max_length=500)
+    telegram_chat_id: Optional[str] = Field(None, max_length=40)
+    bloqueados: List[str] = Field(default_factory=list, max_length=200)
+
+
+def _clinic_for_edit(c: Dict) -> Dict:
+    out = {k: c.get(k) for k in EDITABLE}
+    out.update({
+        "id": c["id"], "activa": c["activa"],
+        "plantilla_nombre": c.get("plantilla", {}).get("nombre", "llamada_perdida"),
+        "plantilla_idioma": c.get("plantilla", {}).get("idioma", "es"),
+        # El token nunca vuelve al navegador: solo si hay uno y cómo acaba.
+        "wa_token_guardado": ("…" + c["wa_token"][-4:]) if c.get("wa_token") else None,
+    })
+    return out
+
+
+@app.get("/api/admin/clinicas/{clinic_id}")
+def admin_clinic_get(clinic_id: str, request: Request, authorization: str = Header("")):
+    _admin(authorization)
+    c = _db(request).get_clinic(clinic_id)
+    if not c:
+        raise HTTPException(404)
+    return _clinic_for_edit(c)
+
+
+@app.put("/api/admin/clinicas/{clinic_id}")
+def admin_clinic_update(clinic_id: str, body: ClinicEditIn, request: Request, authorization: str = Header("")):
+    _admin(authorization)
+    db = _db(request)
+    c = db.get_clinic(clinic_id)
+    if not c:
+        raise HTTPException(404)
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(body.zona_horaria)
+        horario = onboarding.clean_horario(body.horario)
+        envio = onboarding.clean_range(body.envio_permitido)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception:
+        raise HTTPException(400, "Zona horaria no válida")
+
+    pnid = (body.wa_phone_number_id or "").strip() or None
+    if pnid:
+        other = db.clinic_by_wa_number(pnid)
+        if other and other["id"] != clinic_id:
+            raise HTTPException(409, f"Ese número de WhatsApp ya lo usa la clínica {other['nombre']}")
+    numeros = [normalize(n) for n in body.numeros_llamada if normalize(n)]
+    for n in numeros:
+        other = db.clinic_by_called_number(n)
+        if other and other["id"] != clinic_id:
+            raise HTTPException(409, f"El teléfono {n} ya está en la clínica {other['nombre']}")
+
+    updated = {
+        **c,
+        "nombre": body.nombre.strip(),
+        "asistente": body.asistente,
+        "zona_horaria": body.zona_horaria,
+        "wa_phone_number_id": pnid,
+        "numeros_llamada": numeros,
+        "telefono_recepcion": normalize(body.telefono_recepcion) if body.telefono_recepcion else None,
+        "segundos_espera": body.segundos_espera,
+        "horario": horario,
+        "envio_permitido": envio,
+        "plantilla": {**c.get("plantilla", {}), "nombre": body.plantilla_nombre, "idioma": body.plantilla_idioma},
+        "informacion": body.informacion.strip(),
+        "instrucciones": body.instrucciones.strip(),
+        "mensaje_voz": body.mensaje_voz,
+        "telegram_chat_id": body.telegram_chat_id,
+        "bloqueados": [normalize(n) for n in body.bloqueados if normalize(n)],
+    }
+    if body.borrar_wa_token:
+        updated["wa_token"] = None
+    elif body.wa_token and body.wa_token.strip():
+        updated["wa_token"] = body.wa_token.strip()
+    if updated.get("activa") and onboarding.missing_config(updated):
+        raise HTTPException(400, "La clínica está activa y le faltaría: "
+                            + ", ".join(onboarding.missing_config(updated)) + ". Desactívala antes.")
+    for key in ("asistente", "telefono_recepcion", "mensaje_voz", "telegram_chat_id", "wa_token",
+                "wa_phone_number_id"):
+        updated.setdefault(key, None)
+    db.upsert_clinic(updated)
+    return _clinic_for_edit(db.get_clinic(clinic_id))
+
+
+@app.post("/api/admin/clinicas/{clinic_id}/nuevo-codigo")
+def admin_clinic_new_code(clinic_id: str, request: Request, authorization: str = Header("")):
+    """Nuevo código del panel de recepción (el anterior deja de valer)."""
+    _admin(authorization)
+    db = _db(request)
+    c = db.get_clinic(clinic_id)
+    if not c:
+        raise HTTPException(404)
+    c["panel_token"] = secrets.token_urlsafe(24)
+    db.upsert_clinic(c)
+    return {"panel_token": c["panel_token"]}
+
+
 # ------------------------------------------------------------------- panel
 def _panel_clinic(request: Request, authorization: str) -> Dict:
     token = authorization.removeprefix("Bearer ").strip()
@@ -404,7 +525,8 @@ async def panel_reply(conv_id: int, body: ReplyIn, request: Request, authorizati
     # mensaje del paciente.
     if not conv["last_patient_at"] or now() - conv["last_patient_at"] > 24 * 3600:
         raise HTTPException(409, "Han pasado más de 24 h desde el último mensaje del paciente: llámale.")
-    res = await whatsapp.send_text(c.get("wa_phone_number_id", ""), conv["phone"], body.texto)
+    res = await whatsapp.send_text(c.get("wa_phone_number_id", ""), conv["phone"], body.texto,
+                                   token=c.get("wa_token"))
     if not res.ok:
         raise HTTPException(502, f"WhatsApp no aceptó el mensaje: {res.error}")
     db = _db(request)
@@ -441,9 +563,9 @@ def panel_request_done(req_id: int, request: Request, authorization: str = Heade
 
 
 # ------------------------------------------------------------ simulador
-# Solo funciona mientras WhatsApp está en modo simulación (sin WA_TOKEN). Sirve
-# para probar el agente de verdad (con Gemini y la ficha real de una clínica)
-# antes de conectar Meta. Lo usa la pestaña "Probar" de /admin.
+# Prueba el agente de verdad (Gemini y la ficha real de la clínica) sin enviar
+# ningún WhatsApp, también cuando ya hay WhatsApp conectado. Lo usa la pestaña
+# "Probar el agente" de /admin.
 class DevIn(BaseModel):
     clinica_id: str
     telefono: str = Field(..., min_length=6, max_length=30)
@@ -451,9 +573,10 @@ class DevIn(BaseModel):
 
 
 def _dev_guard(authorization: str) -> None:
+    """Además de pedir ADMIN_TOKEN, fuerza el modo simulación en esta petición:
+    aunque haya tokens de WhatsApp, nada sale a Meta (los teléfonos son inventados)."""
     _admin(authorization)
-    if not whatsapp.dry_run:
-        raise HTTPException(409, "El simulador solo funciona sin WA_TOKEN: con WhatsApp real, prueba desde tu móvil.")
+    SIMULATING.set(True)
 
 
 def _dev_clinic(request: Request, clinic_id: str) -> Dict:

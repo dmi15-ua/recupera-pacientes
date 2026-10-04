@@ -9,6 +9,7 @@ Sin WA_TOKEN el cliente no envía nada: guarda los mensajes en `outbox` y los
 imprime, para probar todo en local sin coste.
 """
 import base64
+import contextvars
 import hashlib
 import hmac
 import logging
@@ -48,7 +49,15 @@ class Inbound:
     error_code: Optional[int] = None
 
 
+# Mientras está activo (simulador de /admin), nada sale a Meta aunque haya
+# tokens: el simulador usa teléfonos inventados.
+SIMULATING: contextvars.ContextVar[bool] = contextvars.ContextVar("wa_simulating", default=False)
+
+
 class WhatsAppClient:
+    """Cada clínica puede tener su propio token (clinica.wa_token); si no, se usa
+    WA_TOKEN. Sin ninguno de los dos, los envíos se simulan."""
+
     def __init__(self):
         self.outbox: List[Dict[str, Any]] = []
 
@@ -56,25 +65,30 @@ class WhatsAppClient:
     def dry_run(self) -> bool:
         return not settings.wa_token
 
+    def _token(self, token: Optional[str]) -> str:
+        return "" if SIMULATING.get() else (token or settings.wa_token)
+
     def _url(self, path: str) -> str:
         return f"https://graph.facebook.com/{settings.wa_graph_version}/{path}"
 
-    async def _post(self, phone_number_id: str, payload: Dict[str, Any]) -> SendResult:
-        if self.dry_run:
+    async def _post(self, phone_number_id: str, payload: Dict[str, Any], token: Optional[str]) -> SendResult:
+        token = self._token(token)
+        if not token:
             # En un servidor el simulador puede correr días: no dejar crecer la lista.
             if len(self.outbox) > 1000:
                 del self.outbox[:500]
             self.outbox.append({"phone_number_id": phone_number_id, **payload})
-            body = payload.get("text", {}).get("body") or f"[plantilla {payload.get('template', {}).get('name')}]"
             log.info("[WhatsApp simulado] a %s", payload["to"][:4] + "****")
             # Id único de verdad: uno basado en un contador se repetía tras cada
             # reinicio, chocaba con los ya guardados y la respuesta no se guardaba.
             return SendResult(ok=True, wa_id=f"sim-{uuid.uuid4().hex}")
+        if not phone_number_id:
+            return SendResult(ok=False, error="la clínica no tiene wa_phone_number_id")
         try:
             async with httpx.AsyncClient(timeout=20) as client:
                 r = await client.post(
                     self._url(f"{phone_number_id}/messages"),
-                    headers={"Authorization": f"Bearer {settings.wa_token}"},
+                    headers={"Authorization": f"Bearer {token}"},
                     json=payload,
                 )
             data = r.json() if r.content else {}
@@ -87,16 +101,16 @@ class WhatsAppClient:
             log.error("Error de red con WhatsApp: %s", e)
             return SendResult(ok=False, error=str(e))
 
-    async def send_text(self, phone_number_id: str, to: str, body: str) -> SendResult:
+    async def send_text(self, phone_number_id: str, to: str, body: str, token: Optional[str] = None) -> SendResult:
         return await self._post(phone_number_id, {
             "messaging_product": "whatsapp",
             "to": to_wa(to),
             "type": "text",
             "text": {"body": body[:4000], "preview_url": False},
-        })
+        }, token)
 
     async def send_template(self, phone_number_id: str, to: str, name: str, lang: str,
-                            params: List[str]) -> SendResult:
+                            params: List[str], token: Optional[str] = None) -> SendResult:
         template: Dict[str, Any] = {"name": name, "language": {"code": lang}}
         if params:
             template["components"] = [{
@@ -108,12 +122,13 @@ class WhatsAppClient:
             "to": to_wa(to),
             "type": "template",
             "template": template,
-        })
+        }, token)
 
-    async def download_media(self, media_id: str) -> Optional[bytes]:
-        if self.dry_run:
+    async def download_media(self, media_id: str, token: Optional[str] = None) -> Optional[bytes]:
+        token = self._token(token)
+        if not token:
             return None
-        headers = {"Authorization": f"Bearer {settings.wa_token}"}
+        headers = {"Authorization": f"Bearer {token}"}
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 meta = await client.get(self._url(media_id), headers=headers)

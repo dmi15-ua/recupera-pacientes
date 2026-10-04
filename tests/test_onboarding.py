@@ -29,6 +29,8 @@ FICHA = {
 @pytest.fixture
 def client():
     with TestClient(app) as c:
+        import app.main as main
+        main._hits.clear()  # el límite de envíos por IP es global al proceso
         reset(app.state.db)
         app.state.db.upsert_clinic(CLINIC)
         app.state.db.upsert_clinic(OTHER)
@@ -119,3 +121,78 @@ def test_simulator_on_new_inactive_clinic(client):
     r = client.post("/api/dev/mensaje", json={**body, "texto": "hola"}, headers=ADMIN).json()
     # Sin GEMINI_API_KEY en los tests: respuesta de reserva y pasa a recepción.
     assert r["mensajes"] == [FALLBACK_REPLY] and r["estado"]["modo"] == "human"
+
+
+def _new_clinic(client):
+    app_id = client.post("/api/altas", json=FICHA).json()["id"]
+    return client.post(f"/api/admin/altas/{app_id}/convertir", headers=ADMIN).json()["clinica_id"]
+
+
+def test_edit_clinic_from_admin(client):
+    cid = _new_clinic(client)
+    data = client.get(f"/api/admin/clinicas/{cid}", headers=ADMIN).json()
+    assert data["wa_token_guardado"] is None and "wa_token" not in data
+
+    edit = {**{k: v for k, v in data.items() if k not in ("id", "activa", "wa_token_guardado")},
+            "wa_phone_number_id": "123456", "wa_token": "EAAG-secreto-ABCD",
+            "numeros_llamada": ["965 111 222"], "informacion": "Limpieza: 50 €"}
+    r = client.put(f"/api/admin/clinicas/{cid}", json=edit, headers=ADMIN)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["wa_token_guardado"] == "…ABCD"  # nunca se devuelve entero
+    clinic = app.state.db.get_clinic(cid)
+    assert clinic["wa_token"] == "EAAG-secreto-ABCD"
+    assert clinic["numeros_llamada"] == ["+34965111222"] and clinic["informacion"] == "Limpieza: 50 €"
+    assert app.state.db.clinic_by_wa_number("123456")["id"] == cid
+
+    # Guardar sin token mantiene el anterior; borrar_wa_token lo quita.
+    client.put(f"/api/admin/clinicas/{cid}", json={**edit, "wa_token": ""}, headers=ADMIN)
+    assert app.state.db.get_clinic(cid)["wa_token"] == "EAAG-secreto-ABCD"
+    client.put(f"/api/admin/clinicas/{cid}", json={**edit, "borrar_wa_token": True}, headers=ADMIN)
+    assert "wa_token" not in app.state.db.get_clinic(cid)
+
+    # No se puede repetir el número de WhatsApp de otra clínica.
+    r = client.put(f"/api/admin/clinicas/{cid}", json={**edit, "wa_phone_number_id": "1"}, headers=ADMIN)
+    app.state.db.upsert_clinic({**CLINIC, "wa_phone_number_id": "777"})
+    r = client.put(f"/api/admin/clinicas/{cid}", json={**edit, "wa_phone_number_id": "777"}, headers=ADMIN)
+    assert r.status_code == 409
+
+    # Horario mal escrito -> error claro.
+    r = client.put(f"/api/admin/clinicas/{cid}", json={**edit, "horario": {"lun": ["9 a 2"]}}, headers=ADMIN)
+    assert r.status_code == 400
+
+    old = app.state.db.get_clinic(cid)["panel_token"]
+    new = client.post(f"/api/admin/clinicas/{cid}/nuevo-codigo", headers=ADMIN).json()["panel_token"]
+    assert new != old
+    assert client.get("/api/panel/resumen", headers={"Authorization": f"Bearer {old}"}).status_code == 401
+
+
+def test_per_clinic_token_and_simulator_never_sends(client, monkeypatch):
+    import httpx
+    from app.whatsapp import whatsapp
+    from conftest import run
+    sent = []
+
+    class FakeResp:
+        status_code = 200
+        content = b"1"
+
+        def json(self):
+            return {"messages": [{"id": "wamid.real"}]}
+
+    async def fake_post(self, url, headers=None, json=None):
+        sent.append((url, headers["Authorization"]))
+        return FakeResp()
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    r = run(whatsapp.send_text("999", "+34600000000", "hola", token="TOKEN-CLINICA"))
+    assert r.ok and sent[-1] == ("https://graph.facebook.com/v23.0/999/messages", "Bearer TOKEN-CLINICA")
+
+    # El simulador nunca llama a Meta, aunque la clínica tenga token.
+    cid = _new_clinic(client)
+    app.state.db.upsert_clinic({**app.state.db.get_clinic(cid), "wa_phone_number_id": "999",
+                                "wa_token": "TOKEN-CLINICA"})
+    n = len(sent)
+    body = {"clinica_id": cid, "telefono": "600123999"}
+    assert client.post("/api/dev/llamada", json=body, headers=ADMIN).json()["resultado"] == "enviado"
+    assert len(sent) == n

@@ -48,6 +48,15 @@ dialog::backdrop{background:rgba(19,32,29,.45)}
 .dlg{padding:22px;display:grid;gap:14px;max-height:85vh;overflow:auto}
 .dlg h2{margin:0;font-size:20px}
 pre{white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:14px;margin:0;font:13.5px/1.5 ui-monospace,Consolas,monospace}
+.ef{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ef label{display:grid;gap:4px;font-size:13px;font-weight:600}
+.ef label small{font-weight:400;color:var(--muted)}
+.ef .full{grid-column:1/-1}
+.ef input,.ef textarea{width:100%;font:inherit;font-size:14px;border:1.5px solid var(--line);border-radius:10px;padding:8px 10px}
+.ef textarea{min-height:90px;resize:vertical}
+.ef h3{grid-column:1/-1;margin:10px 0 0;font-size:15px;border-top:1px solid var(--line);padding-top:12px}
+.hrow{display:grid;grid-template-columns:90px 1fr;gap:8px;align-items:center;font-size:13.5px}
+@media(max-width:600px){.ef{grid-template-columns:1fr}}
 .empty{color:var(--muted);padding:30px;text-align:center;background:var(--surface);border-radius:14px;border:1px dashed var(--line)}
 @media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}}
 .sim{display:grid;grid-template-columns:1fr 300px;gap:16px}
@@ -134,7 +143,7 @@ function render(){
 }
 
 function renderClinics(v){
-  v.append(el('p', 'hint', 'Últimos 30 días. Para editar precios, horario o el WhatsApp de una clínica: tabla rp.clinics de la base de datos (pestaña Data de Postgres en Railway, o Table Editor en Supabase).'));
+  v.append(el('p', 'hint', 'Últimos 30 días. Con "Editar" cambias el número de WhatsApp, los teléfonos, el horario, los precios y las instrucciones de cada clínica.'));
   if (!data.clinicas.length) return v.append(el('div', 'empty', 'Aún no hay clínicas. Convierte una ficha de alta para crear la primera.'));
   const grid = el('div', 'cards');
   for (const c of data.clinicas){
@@ -152,7 +161,8 @@ function renderClinics(v){
     tok.onclick = () => openDialog('Código del panel de ' + c.nombre, [
       el('p', 'muted', 'Dáselo a recepción para entrar en /panel. No lo compartas fuera de la clínica.'),
       el('div', 'mono', c.panel_token || '(sin código: añádelo en Supabase)')]);
-    row.append(toggle, tok); card.append(row);
+    const edit = el('button', 'ghost', 'Editar'); edit.onclick = () => editClinic(c.id);
+    row.append(toggle, edit, tok); card.append(row);
     grid.append(card);
   }
   v.append(grid);
@@ -288,6 +298,92 @@ function renderSim(v){
   side.append(cfg, state, ideas);
   wrap.append(phone, side); v.append(wrap);
   paint(); showState(null);
+}
+
+// ------------------------------------------------------------- editar
+const DAYN = [['lun','Lunes'],['mar','Martes'],['mie','Miércoles'],['jue','Jueves'],['vie','Viernes'],['sab','Sábado'],['dom','Domingo']];
+async function editClinic(id){
+  let c;
+  try { c = await api('/api/admin/clinicas/' + id); } catch (e) { return alert(e.message); }
+  const f = el('form', 'ef');
+  const field = (label, name, value, opts = {}) => {
+    const l = el('label', opts.full ? 'full' : '', label);
+    if (opts.help) l.append(el('small', '', opts.help));
+    const i = el(opts.area ? 'textarea' : 'input'); i.name = name; i.value = value ?? '';
+    if (opts.placeholder) i.placeholder = opts.placeholder;
+    if (opts.type) i.type = opts.type;
+    if (opts.rows) i.rows = opts.rows;
+    l.append(i); f.append(l); return i;
+  };
+  f.append(el('h3', '', 'Datos básicos'));
+  field('Nombre', 'nombre', c.nombre);
+  field('Nombre del asistente', 'asistente', c.asistente, {placeholder: 'Laura'});
+
+  f.append(el('h3', '', 'WhatsApp (Meta)'));
+  field('Phone number ID', 'wa_phone_number_id', c.wa_phone_number_id, {help: 'El "Phone number ID" de Meta (solo números), no el teléfono.'});
+  field('Token de acceso', 'wa_token', '', {type: 'password', placeholder: c.wa_token_guardado ? 'Guardado (' + c.wa_token_guardado + '). Vacío = no cambiar' : 'Vacío = usa WA_TOKEN general', help: 'Solo si esta clínica usa su propia cuenta de Meta.'});
+  const del = el('label', 'full'); const cb = el('input'); cb.type = 'checkbox'; cb.name = 'borrar_wa_token'; cb.style.width = 'auto';
+  if (c.wa_token_guardado){ del.append(cb, ' Quitar el token propio y usar el general'); f.append(del); }
+  field('Plantilla de la llamada perdida', 'plantilla_nombre', c.plantilla_nombre);
+  field('Idioma de la plantilla', 'plantilla_idioma', c.plantilla_idioma);
+
+  f.append(el('h3', '', 'Teléfonos'));
+  field('Números a los que llaman los pacientes', 'numeros_llamada', (c.numeros_llamada || []).join(', '), {full: true, help: 'Separados por comas. Así se sabe de qué clínica es cada llamada perdida.'});
+  field('Teléfono de recepción (Twilio)', 'telefono_recepcion', c.telefono_recepcion, {help: 'Solo si usas Twilio: a dónde se pasa la llamada.'});
+  field('Segundos sonando antes de darla por perdida', 'segundos_espera', c.segundos_espera ?? 20, {type: 'number'});
+  field('Números bloqueados', 'bloqueados', (c.bloqueados || []).join(', '), {full: true, help: 'Proveedores, comerciales… nunca se les escribe.'});
+
+  f.append(el('h3', '', 'Horario'));
+  const hbox = el('div', 'full'); hbox.style.cssText = 'display:grid;gap:6px';
+  for (const [k, n] of DAYN){
+    const r = el('div', 'hrow'); const i = el('input'); i.name = 'h_' + k;
+    i.value = ((c.horario || {})[k] || []).join(', '); i.placeholder = 'cerrado  (ej.: 09:00-14:00, 16:00-20:00)';
+    r.append(el('span', '', n), i); hbox.append(r);
+  }
+  f.append(hbox);
+  field('Franja en la que se puede escribir', 'envio_permitido', c.envio_permitido || '09:00-21:00', {help: 'Fuera de ella, el WhatsApp se aplaza.'});
+  field('Zona horaria', 'zona_horaria', c.zona_horaria || 'Europe/Madrid');
+
+  f.append(el('h3', '', 'Lo que sabe el asistente'));
+  field('Información de la clínica', 'informacion', c.informacion, {area: true, full: true, rows: 12, help: 'Servicios, precios, dirección, seguros… Es lo ÚNICO que el asistente puede afirmar.'});
+  field('Instrucciones', 'instrucciones', c.instrucciones, {area: true, full: true, rows: 4});
+  field('Mensaje de voz (Twilio)', 'mensaje_voz', c.mensaje_voz, {full: true, placeholder: 'Por defecto: "Ahora mismo no podemos atenderte. En unos minutos te escribiremos por WhatsApp…"'});
+  field('Chat de Telegram para avisos', 'telegram_chat_id', c.telegram_chat_id);
+
+  const msg = el('div', 'err full');
+  const save = el('button', 'primary', 'Guardar'); save.type = 'submit';
+  const newCode = el('button', 'ghost', 'Generar nuevo código del panel'); newCode.type = 'button';
+  newCode.onclick = async () => {
+    if (!confirm('El código actual dejará de funcionar. ¿Seguro?')) return;
+    const r = await api(`/api/admin/clinicas/${id}/nuevo-codigo`, {method: 'POST'});
+    msg.style.color = 'var(--green)'; msg.textContent = 'Nuevo código: ' + r.panel_token;
+  };
+  const acts = el('div', 'row full'); acts.append(save, newCode); f.append(acts, msg);
+
+  const list = v => v.split(',').map(x => x.trim()).filter(Boolean);
+  f.onsubmit = async e => {
+    e.preventDefault(); msg.style.color = ''; msg.textContent = '';
+    const g = n => f.elements[n] ? f.elements[n].value.trim() : '';
+    const horario = {}; for (const [k] of DAYN) horario[k] = list(g('h_' + k).replace(/cerrado/i, ''));
+    const body = {
+      nombre: g('nombre'), asistente: g('asistente') || null, zona_horaria: g('zona_horaria'),
+      wa_phone_number_id: g('wa_phone_number_id') || null, wa_token: g('wa_token') || null,
+      borrar_wa_token: !!(f.elements.borrar_wa_token && f.elements.borrar_wa_token.checked),
+      numeros_llamada: list(g('numeros_llamada')), telefono_recepcion: g('telefono_recepcion') || null,
+      segundos_espera: +g('segundos_espera') || 20, horario, envio_permitido: g('envio_permitido'),
+      plantilla_nombre: g('plantilla_nombre'), plantilla_idioma: g('plantilla_idioma'),
+      informacion: g('informacion'), instrucciones: g('instrucciones'), mensaje_voz: g('mensaje_voz') || null,
+      telegram_chat_id: g('telegram_chat_id') || null, bloqueados: list(g('bloqueados')),
+    };
+    save.disabled = true;
+    try {
+      await api('/api/admin/clinicas/' + id, {method: 'PUT', body: JSON.stringify(body)});
+      $('dlg').close(); load();
+    } catch (err) {
+      msg.textContent = err.message.startsWith('[object') ? 'Revisa los campos.' : err.message;
+    } finally { save.disabled = false; }
+  };
+  openDialog('Editar ' + c.nombre, [f]);
 }
 
 function openDialog(title, nodes){

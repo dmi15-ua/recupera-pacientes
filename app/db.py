@@ -23,7 +23,11 @@ CLINIC_FIELDS = (
     "id", "nombre", "asistente", "activa", "zona_horaria", "wa_phone_number_id",
     "telefono_recepcion", "segundos_espera", "numeros_llamada", "horario", "envio_permitido",
     "plantilla", "informacion", "instrucciones", "mensaje_voz", "telegram_chat_id",
-    "panel_token", "bloqueados", "application_id",
+    "panel_token", "bloqueados", "application_id", "wa_token",
+)
+# Columnas añadidas después de crear la tabla: se añaden solas al arrancar.
+MIGRATIONS = (
+    ("clinics", "wa_token", "TEXT"),
 )
 APPLICATION_JSON_FIELDS = ("horario", "servicios", "faq")
 
@@ -45,6 +49,7 @@ CREATE TABLE IF NOT EXISTS {T}clinics (
     instrucciones       TEXT,
     mensaje_voz         TEXT,
     telegram_chat_id    TEXT,
+    wa_token            TEXT,
     panel_token         TEXT,
     bloqueados          {JSON},
     application_id      BIGINT,
@@ -212,6 +217,16 @@ class Database:
         for stmt in ddl.replace("{T}", self.prefix).split(";"):
             if stmt.strip():
                 self._run(stmt, ())
+        for table, column, sql_type in MIGRATIONS:
+            if not self._has_column(table, column):
+                self._run(f"ALTER TABLE {{T}}{table} ADD COLUMN {column} {sql_type}")
+
+    def _has_column(self, table: str, column: str) -> bool:
+        if self.pg:
+            return self._one("SELECT 1 AS x FROM information_schema.columns "
+                             "WHERE table_schema = ? AND table_name = ? AND column_name = ?",
+                             (self.prefix.rstrip("."), table, column)) is not None
+        return any(r["name"] == column for r in self._all(f"PRAGMA table_info({table})"))
 
     # ------------------------------------------------------------ utilidades
     def _sql(self, sql: str) -> str:
