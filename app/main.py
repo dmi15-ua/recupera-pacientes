@@ -17,7 +17,7 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
-from app import service, telephony
+from app import onboarding, service, telephony
 from app.agent import Agent
 from app.config import settings
 from app.db import Database, now
@@ -34,14 +34,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "web")
 
 
-def load_clinics(db: Database, path: str) -> int:
+def seed_clinics(db: Database, path: str) -> int:
+    """Carga las clínicas del fichero SOLO si no existen: una vez en la base de
+    datos, se editan allí (Supabase o /admin) y el fichero no las pisa."""
     if not os.path.exists(path):
-        log.warning("No existe %s: no hay clínicas configuradas", path)
         return 0
     with open(path, encoding="utf-8") as f:
         clinics = json.load(f)
     for c in clinics:
-        db.upsert_clinic(c)
+        db.upsert_clinic(c, overwrite=False)
     return len(clinics)
 
 
@@ -60,10 +61,11 @@ async def worker_loop(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.db = Database(settings.database_path)
+    app.state.db = Database(settings.database_url or settings.database_path, settings.db_schema)
     app.state.agent = Agent(app.state.db)
-    n = load_clinics(app.state.db, settings.clinics_file)
-    log.info("Clínicas cargadas: %s. WhatsApp %s. LLM %s.", n,
+    seed_clinics(app.state.db, settings.clinics_file)
+    log.info("Base de datos: %s. Clínicas: %s. WhatsApp %s. LLM %s.",
+             "Supabase/Postgres" if app.state.db.pg else "SQLite", len(app.state.db.list_clinics()),
              "SIMULADO" if whatsapp.dry_run else "real",
              settings.gemini_model if settings.gemini_api_key else "sin key")
     task = None
@@ -90,6 +92,16 @@ def landing():
 @app.get("/panel", include_in_schema=False)
 def panel_page():
     return FileResponse(os.path.join(WEB, "panel.html"))
+
+
+@app.get("/alta", include_in_schema=False)
+def application_page():
+    return FileResponse(os.path.join(WEB, "alta.html"))
+
+
+@app.get("/admin", include_in_schema=False)
+def admin_page():
+    return FileResponse(os.path.join(WEB, "admin.html"))
 
 
 @app.get("/privacidad", include_in_schema=False)
@@ -239,6 +251,112 @@ async def create_lead(lead: LeadIn, request: Request):
         db.add_lead(lead.clinica.strip(), lead.nombre, phone, lead.email, lead.mensaje)
         await notify_owner(f"🆕 Nuevo interesado\nClínica: {lead.clinica}\nContacto: {lead.nombre or '-'}\n"
                            f"Teléfono: {phone}\nEmail: {lead.email or '-'}\n{lead.mensaje or ''}")
+    return {"ok": True}
+
+
+# ------------------------------------------------------------ ficha de alta
+@app.post("/api/altas")
+async def create_application(body: onboarding.ApplicationIn, request: Request):
+    if body.hp:
+        return {"ok": True}
+    if not _rate_ok("alta:" + _client_ip(request), limit=3):
+        raise HTTPException(429, "Demasiados envíos. Prueba en unos minutos.")
+    if not body.acepta:
+        raise HTTPException(400, "Necesitamos tu consentimiento para tratar estos datos.")
+    if body.email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", body.email):
+        raise HTTPException(400, "Revisa el email.")
+    row = onboarding.application_row(body)
+    db = _db(request)
+    if db.recent_application(row["phone"], now() - 600):
+        return {"ok": True}
+    app_id = db.add_application(row)
+    await notify_owner(f"📋 Nueva ficha de alta\nClínica: {row['clinic_name']}\n"
+                       f"Contacto: {row['contact_name'] or '-'} · {row['phone']}\n"
+                       f"Servicios: {len(row['servicios'])}\nRevisar: {settings.public_base_url}/admin")
+    return {"ok": True, "id": app_id}
+
+
+# ------------------------------------------------------------------- admin
+def _admin(authorization: str) -> None:
+    if not settings.admin_token:
+        raise HTTPException(503, "Define ADMIN_TOKEN para usar el panel de administración")
+    if not secrets.compare_digest(authorization.removeprefix("Bearer ").strip(), settings.admin_token):
+        raise HTTPException(401, "Token no válido")
+
+
+@app.get("/api/admin/resumen")
+def admin_summary(request: Request, authorization: str = Header("")):
+    _admin(authorization)
+    db = _db(request)
+    since = now() - 30 * 86400
+    clinics = []
+    for c in db.list_clinics():
+        clinics.append({
+            "id": c["id"], "nombre": c["nombre"], "activa": c["activa"],
+            "faltan": onboarding.missing_config(c), "stats_30d": db.clinic_stats(c["id"], since),
+            "panel_token": c.get("panel_token"),
+        })
+    return {"leads": db.list_leads(), "altas": db.list_applications(), "clinicas": clinics}
+
+
+@app.get("/api/admin/altas/{app_id}/vista-previa")
+def admin_application_preview(app_id: int, request: Request, authorization: str = Header("")):
+    """Lo que leería el asistente si se crea la clínica con esta ficha."""
+    _admin(authorization)
+    a = _db(request).get_application(app_id)
+    if not a:
+        raise HTTPException(404)
+    return {"informacion": onboarding.build_informacion(a), "instrucciones": onboarding.build_instrucciones(a)}
+
+
+@app.post("/api/admin/altas/{app_id}/convertir")
+def admin_convert(app_id: int, request: Request, authorization: str = Header("")):
+    _admin(authorization)
+    db = _db(request)
+    a = db.get_application(app_id)
+    if not a:
+        raise HTTPException(404)
+    if a.get("clinic_id") and db.get_clinic(a["clinic_id"]):
+        raise HTTPException(409, f"Ya se creó la clínica {a['clinic_id']}")
+    clinic = onboarding.clinic_from_application(a, db.unique_clinic_id(a["clinic_name"]))
+    db.upsert_clinic(clinic, overwrite=False)
+    db.set_application_status(app_id, "convertida", clinic["id"])
+    return {"ok": True, "clinica_id": clinic["id"], "panel_token": clinic["panel_token"],
+            "faltan": onboarding.missing_config(clinic)}
+
+
+class StatusIn(BaseModel):
+    estado: str = Field(..., pattern="^[a-z_]{2,20}$")
+
+
+@app.post("/api/admin/altas/{app_id}/estado")
+def admin_application_status(app_id: int, body: StatusIn, request: Request, authorization: str = Header("")):
+    _admin(authorization)
+    _db(request).set_application_status(app_id, body.estado)
+    return {"ok": True}
+
+
+@app.post("/api/admin/leads/{lead_id}/estado")
+def admin_lead_status(lead_id: int, body: StatusIn, request: Request, authorization: str = Header("")):
+    _admin(authorization)
+    _db(request).set_lead_status(lead_id, body.estado)
+    return {"ok": True}
+
+
+class ActiveIn(BaseModel):
+    activa: bool
+
+
+@app.post("/api/admin/clinicas/{clinic_id}/activa")
+def admin_clinic_active(clinic_id: str, body: ActiveIn, request: Request, authorization: str = Header("")):
+    _admin(authorization)
+    db = _db(request)
+    c = db.get_clinic(clinic_id)
+    if not c:
+        raise HTTPException(404)
+    if body.activa and onboarding.missing_config(c):
+        raise HTTPException(400, "Antes de activarla falta: " + ", ".join(onboarding.missing_config(c)))
+    db.set_clinic_active(clinic_id, body.activa)
     return {"ok": True}
 
 

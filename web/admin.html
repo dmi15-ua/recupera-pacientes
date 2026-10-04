@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Administración · RecuperaPacientes</title>
+<style>
+:root{--bg:#F4F2EE;--surface:#fff;--ink:#13201D;--muted:#5B6764;--line:#E3DFD6;--green:#176B4D;--mint:#E4F1EA;--coral:#D9483B;--coral-soft:#FBE9E6;--amber:#8A5A00;--amber-soft:#FFF4D6}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+button{font:inherit;font-weight:600;cursor:pointer;border:0;border-radius:10px;padding:8px 13px}
+.primary{background:var(--green);color:#fff}
+.ghost{background:transparent;box-shadow:inset 0 0 0 1.5px var(--line);color:var(--ink)}
+.ghost:hover{box-shadow:inset 0 0 0 1.5px var(--ink)}
+.danger{background:transparent;color:var(--coral)}
+input,select{font:inherit;border:1.5px solid var(--line);border-radius:10px;padding:9px 11px;background:#fff;color:var(--ink)}
+#login{max-width:380px;margin:12vh auto;background:var(--surface);padding:28px;border-radius:18px;box-shadow:0 10px 40px -15px rgba(0,0,0,.2);display:grid;gap:14px}
+#login h1{margin:0;font-size:22px}
+.err{color:var(--coral);font-size:14px;min-height:18px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 20px;background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2;flex-wrap:wrap}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tabs button{background:none;color:var(--muted)}
+.tabs button.on{background:var(--mint);color:var(--green)}
+.count{font-size:12px;background:var(--coral);color:#fff;border-radius:999px;padding:1px 7px;margin-left:4px}
+main{max-width:1100px;margin:0 auto;padding:24px 16px 60px}
+.hint{color:var(--muted);font-size:14px;margin:0 0 18px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px;display:grid;gap:12px;align-content:start}
+.card h3{margin:0;font-size:17px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.badge{font-size:12px;font-weight:700;border-radius:999px;padding:3px 9px;white-space:nowrap}
+.on-b{background:var(--mint);color:var(--green)}.off-b{background:#ECEAE5;color:var(--muted)}
+.new-b{background:var(--amber-soft);color:var(--amber)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stat{background:var(--bg);border-radius:10px;padding:8px;text-align:center}
+.stat b{display:block;font-size:20px}
+.stat span{font-size:11.5px;color:var(--muted);line-height:1.2;display:block}
+.warn{background:var(--amber-soft);color:var(--amber);border-radius:10px;padding:8px 10px;font-size:13.5px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:13px;background:var(--bg);padding:3px 7px;border-radius:6px;word-break:break-all}
+table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top;font-size:14px}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:#FBFAF7}
+.scroll{overflow-x:auto}
+.muted{color:var(--muted)}
+dialog{border:0;border-radius:18px;padding:0;max-width:760px;width:calc(100% - 24px);box-shadow:0 20px 60px -20px rgba(0,0,0,.4)}
+dialog::backdrop{background:rgba(19,32,29,.45)}
+.dlg{padding:22px;display:grid;gap:14px;max-height:85vh;overflow:auto}
+.dlg h2{margin:0;font-size:20px}
+pre{white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:14px;margin:0;font:13.5px/1.5 ui-monospace,Consolas,monospace}
+.empty{color:var(--muted);padding:30px;text-align:center;background:var(--surface);border-radius:14px;border:1px dashed var(--line)}
+@media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+
+<form id="login" hidden>
+  <h1>Administración</h1>
+  <input id="token" type="password" placeholder="ADMIN_TOKEN" autocomplete="current-password" required>
+  <button class="primary" type="submit">Entrar</button>
+  <div class="err" id="loginErr"></div>
+</form>
+
+<div id="app" hidden>
+  <header>
+    <b>RecuperaPacientes · Admin</b>
+    <div class="tabs" id="tabs">
+      <button data-t="clinicas" class="on">Clínicas</button>
+      <button data-t="altas">Fichas de alta</button>
+      <button data-t="leads">Leads</button>
+    </div>
+    <button class="ghost" id="logout">Salir</button>
+  </header>
+  <main id="view"></main>
+</div>
+
+<dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
+
+<script>
+let token = '';
+try { token = localStorage.getItem('rp_admin') || ''; } catch (e) {}
+let data = null, tab = 'clinicas';
+const $ = id => document.getElementById(id);
+function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+const fmt = t => new Date(t * 1000).toLocaleString('es-ES', {day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit'});
+
+async function api(path, opts = {}){
+  const r = await fetch(path, {...opts, headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}});
+  if (r.status === 401){ showLogin('Token no válido.'); throw new Error('401'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || 'Error ' + r.status);
+  return j;
+}
+function showLogin(err){ $('app').hidden = true; $('login').hidden = false; $('loginErr').textContent = err || ''; }
+$('login').onsubmit = e => { e.preventDefault(); token = $('token').value.trim(); try { localStorage.setItem('rp_admin', token); } catch (e) {} load(); };
+$('logout').onclick = () => { token = ''; try { localStorage.removeItem('rp_admin'); } catch (e) {} showLogin(); };
+$('tabs').onclick = e => { const t = e.target.closest('button')?.dataset.t; if (t){ tab = t; render(); } };
+
+async function load(){
+  if (!token) return showLogin();
+  try { data = await api('/api/admin/resumen'); } catch (e) { if (e.message !== '401') showLogin(e.message); return; }
+  $('login').hidden = true; $('app').hidden = false;
+  render();
+}
+
+function render(){
+  document.querySelectorAll('#tabs button').forEach(b => {
+    b.classList.toggle('on', b.dataset.t === tab);
+    b.querySelector('.count')?.remove();
+    const n = b.dataset.t === 'altas' ? data.altas.filter(a => a.status === 'nueva').length
+            : b.dataset.t === 'leads' ? data.leads.filter(l => l.status === 'nuevo').length : 0;
+    if (n) b.append(el('span', 'count', n));
+  });
+  const v = $('view'); v.replaceChildren();
+  ({clinicas: renderClinics, altas: renderApps, leads: renderLeads})[tab](v);
+}
+
+function renderClinics(v){
+  v.append(el('p', 'hint', 'Últimos 30 días. Para editar precios, horario o el WhatsApp de una clínica: Supabase → Table Editor → schema "rp" → tabla "clinics".'));
+  if (!data.clinicas.length) return v.append(el('div', 'empty', 'Aún no hay clínicas. Convierte una ficha de alta para crear la primera.'));
+  const grid = el('div', 'cards');
+  for (const c of data.clinicas){
+    const card = el('div', 'card');
+    const h = el('h3', '', c.nombre); h.append(el('span', 'badge ' + (c.activa ? 'on-b' : 'off-b'), c.activa ? 'Activa' : 'Inactiva'));
+    const s = c.stats_30d, stats = el('div', 'stats');
+    [['llamadas_perdidas', 'llamadas perdidas'], ['whatsapps_enviados', 'WhatsApp enviados'], ['conversaciones', 'conversaciones'], ['solicitudes_cita', 'citas pedidas']]
+      .forEach(([k, l]) => { const d = el('div', 'stat'); d.append(el('b', '', s[k]), el('span', '', l)); stats.append(d); });
+    card.append(h, el('div', 'muted', 'id: ' + c.id), stats);
+    if (c.faltan.length) card.append(el('div', 'warn', 'Falta: ' + c.faltan.join(', ')));
+    const row = el('div', 'row');
+    const toggle = el('button', c.activa ? 'ghost' : 'primary', c.activa ? 'Desactivar' : 'Activar');
+    toggle.onclick = async () => { try { await api(`/api/admin/clinicas/${c.id}/activa`, {method: 'POST', body: JSON.stringify({activa: !c.activa})}); load(); } catch (e) { alert(e.message); } };
+    const tok = el('button', 'ghost', 'Código del panel');
+    tok.onclick = () => openDialog('Código del panel de ' + c.nombre, [
+      el('p', 'muted', 'Dáselo a recepción para entrar en /panel. No lo compartas fuera de la clínica.'),
+      el('div', 'mono', c.panel_token || '(sin código: añádelo en Supabase)')]);
+    row.append(toggle, tok); card.append(row);
+    grid.append(card);
+  }
+  v.append(grid);
+}
+
+const STATUS = {nueva: 'Nueva', revisada: 'Revisada', convertida: 'Clínica creada', descartada: 'Descartada'};
+function renderApps(v){
+  v.append(el('p', 'hint', 'Fichas que rellenan las clínicas en /alta. Revisa la vista previa y crea la clínica (queda inactiva hasta conectar su WhatsApp).'));
+  if (!data.altas.length) return v.append(el('div', 'empty', 'Todavía no hay fichas. Envía a tus clínicas el enlace /alta.'));
+  const grid = el('div', 'cards');
+  for (const a of data.altas){
+    const card = el('div', 'card');
+    const h = el('h3', '', a.clinic_name); h.append(el('span', 'badge ' + (a.status === 'nueva' ? 'new-b' : a.status === 'convertida' ? 'on-b' : 'off-b'), STATUS[a.status] || a.status));
+    card.append(h, el('div', 'muted', [a.contact_name, a.phone, a.email].filter(Boolean).join(' · ')),
+      el('div', '', `${(a.servicios || []).length} servicios · ${Object.keys(a.faq || {}).length} respuestas frecuentes · ${fmt(a.created_at)}`));
+    const row = el('div', 'row');
+    const see = el('button', 'ghost', 'Ver ficha'); see.onclick = () => showApp(a);
+    row.append(see);
+    if (a.status !== 'convertida'){
+      const conv = el('button', 'primary', 'Crear clínica'); conv.onclick = () => convert(a);
+      const drop = el('button', 'danger', 'Descartar'); drop.onclick = async () => { await api(`/api/admin/altas/${a.id}/estado`, {method: 'POST', body: JSON.stringify({estado: 'descartada'})}); load(); };
+      row.append(conv, drop);
+    }
+    card.append(row); grid.append(card);
+  }
+  v.append(grid);
+}
+
+async function showApp(a){
+  const prev = await api(`/api/admin/altas/${a.id}/vista-previa`);
+  const tbl = el('table'); const head = el('tr'); ['Servicio', 'Precio', 'Nota'].forEach(t => head.append(el('th', '', t))); tbl.append(head);
+  for (const s of a.servicios || []){ const tr = el('tr'); [s.servicio, s.precio, s.nota].forEach(t => tr.append(el('td', '', t || ''))); tbl.append(tr); }
+  const days = Object.entries(a.horario || {}).map(([d, r]) => `${d}: ${r.length ? r.join(', ') : 'cerrado'}`).join('\n');
+  openDialog(a.clinic_name, [
+    el('div', 'muted', [a.especialidad, a.direccion, a.telefono_clinica, a.centralita].filter(Boolean).join(' · ')),
+    el('b', '', 'Servicios'), Object.assign(el('div', 'scroll'), {}).appendChild(tbl).parentNode,
+    el('b', '', 'Horario'), el('pre', '', days || '(sin horario)'),
+    el('b', '', 'Lo que leerá el asistente'), el('pre', '', prev.informacion),
+    el('b', '', 'Instrucciones'), el('pre', '', prev.instrucciones || '(ninguna)'),
+  ]);
+}
+
+async function convert(a){
+  if (!confirm(`¿Crear la clínica "${a.clinic_name}"? Quedará inactiva hasta conectar su WhatsApp.`)) return;
+  try {
+    const r = await api(`/api/admin/altas/${a.id}/convertir`, {method: 'POST'});
+    openDialog('Clínica creada', [
+      el('p', '', `Se ha creado "${r.clinica_id}". Antes de activarla falta: ${r.faltan.join(', ') || 'nada'}.`),
+      el('p', 'muted', 'Código del panel para recepción:'), el('div', 'mono', r.panel_token)]);
+    load();
+  } catch (e) { alert(e.message); }
+}
+
+const LEAD_STATUS = ['nuevo', 'contactado', 'demo', 'cliente', 'descartado'];
+function renderLeads(v){
+  v.append(el('p', 'hint', 'Personas que pidieron una demo desde la landing.'));
+  if (!data.leads.length) return v.append(el('div', 'empty', 'Aún no hay leads.'));
+  const wrap = el('div', 'scroll'), tbl = el('table'), head = el('tr');
+  ['Fecha', 'Clínica', 'Contacto', 'Teléfono', 'Email', 'Mensaje', 'Estado'].forEach(t => head.append(el('th', '', t)));
+  tbl.append(head);
+  for (const l of data.leads){
+    const tr = el('tr');
+    [fmt(l.created_at), l.clinic_name, l.contact_name, l.phone, l.email, l.message].forEach(t => tr.append(el('td', '', t || '')));
+    const sel = el('select'); LEAD_STATUS.forEach(s => { const o = el('option', '', s); o.value = s; o.selected = s === l.status; sel.append(o); });
+    sel.onchange = async () => { await api(`/api/admin/leads/${l.id}/estado`, {method: 'POST', body: JSON.stringify({estado: sel.value})}); load(); };
+    const td = el('td'); td.append(sel); tr.append(td); tbl.append(tr);
+  }
+  wrap.append(tbl); v.append(wrap);
+}
+
+function openDialog(title, nodes){
+  const b = $('dlgBody'); b.replaceChildren(el('h2', '', title), ...nodes);
+  const close = el('button', 'ghost', 'Cerrar'); close.onclick = () => $('dlg').close();
+  b.append(close); $('dlg').showModal();
+}
+
+load();
+</script>
+</body>
+</html>

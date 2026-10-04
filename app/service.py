@@ -136,6 +136,8 @@ async def handle_inbound(db: Database, agent: Agent, ev: Inbound) -> str:
     clinic = db.clinic_by_wa_number(ev.phone_number_id)
     if not clinic:
         return "ignorado: número de WhatsApp sin clínica"
+    if not clinic.get("activa", True):
+        return "ignorado: clínica inactiva"
 
     if ev.kind == "status":
         return await _handle_status(db, clinic, ev)
@@ -242,8 +244,6 @@ def maintenance(db: Database, t: Optional[int] = None) -> None:
     t = t or now()
     closed = db.close_idle(t - settings.idle_close_s)
     cutoff = t - settings.retention_days * 86400
-    purged = db.purge_old_messages(cutoff)
-    db._exec("DELETE FROM requests WHERE created_at < ?", (cutoff,))
-    db._exec("DELETE FROM missed_calls WHERE received_at < ?", (cutoff,))
+    purged = db.purge_older_than(cutoff)
     if closed or purged:
         log.info("Mantenimiento: %s conversaciones cerradas, %s borradas por antigüedad", closed, purged)

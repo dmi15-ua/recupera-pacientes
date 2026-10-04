@@ -37,7 +37,8 @@ Llamada perdida ──► espera 2 min ──► ¿hay que escribir? ──► p
 
 | Pieza | Coste |
 |---|---|
-| Servidor | Un VPS pequeño (unos 4–5 €/mes) o el nivel gratuito de Oracle Cloud. SQLite, sin base de datos aparte. |
+| Base de datos | Supabase, plan gratuito (de sobra para decenas de clínicas). |
+| Servidor | Railway (unos 5 $/mes) o el nivel gratuito de Oracle Cloud. El servidor no guarda datos: todo va a Supabase. |
 | WhatsApp | Las respuestas al paciente son gratis. Se paga la plantilla inicial (céntimos por llamada perdida; mira la tabla de precios de Meta para España). |
 | LLM | Gemini Flash-Lite: fracciones de céntimo por conversación. **Con facturación activada** (el nivel gratis puede usar los datos para entrenar). |
 | Avisos | Telegram: gratis. |
@@ -70,20 +71,29 @@ curl -X POST localhost:8000/api/dev/mensaje -H "Authorization: Bearer dev-admin"
 ```
 
 - Landing: <http://localhost:8000>
-- Panel de recepción: <http://localhost:8000/panel> (código: el `panel_token` de `clinicas.json`)
+- Ficha de alta para clínicas: <http://localhost:8000/alta>
+- Dashboard de administración: <http://localhost:8000/admin> (código: `ADMIN_TOKEN`)
+- Panel de recepción: <http://localhost:8000/panel> (código: el `panel_token` de la clínica)
 
-Tests:
+Tests (con SQLite):
 
 ```bash
 python -m pytest -q
 ```
 
+Para pasarlos también contra Postgres, pon `TEST_DATABASE_URL` con la URL de Supabase. Usan el
+schema `rp_test`, que borran entero; nunca tocan `rp`.
+
 ## Poner en producción
 
-1. **Servidor**: despliega el `Dockerfile` con un volumen en `/app/data`. Copia ahí `clinicas.json`
-   y pon `CLINICS_FILE=/app/data/clinicas.json`. Un solo proceso (no uses `--workers`).
-2. **Gemini**: crea una API key en un proyecto de Google Cloud con facturación → `GEMINI_API_KEY`.
-3. **WhatsApp (Meta)**:
+1. **Base de datos (Supabase)**: copia la URL de conexión en *Project Settings → Database →
+   Connection string → URI*, modo **Session pooler** → `DATABASE_URL`. Al arrancar, la app crea
+   sus tablas en el schema `rp` (no toca nada de `public`). Elige un proyecto en una región de la UE.
+2. **Servidor (Railway)**: crea un servicio desde el repo (usa el `Dockerfile`), pon las variables
+   de `.env.example` y un dominio. **Una sola réplica**: el bucle de tareas vive dentro del proceso.
+   No hace falta volumen.
+3. **Gemini**: crea una API key en un proyecto de Google Cloud con facturación → `GEMINI_API_KEY`.
+4. **WhatsApp (Meta)**:
    - Crea una app en developers.facebook.com con el producto WhatsApp y registra el número de la
      clínica. Si recepción quiere seguir usando la app WhatsApp Business en el móvil, usa la
      incorporación con **coexistencia**.
@@ -95,7 +105,7 @@ python -m pytest -q
      > ayudar? Responde a este mensaje y te atendemos por aquí. Si no quieres recibir mensajes,
      > responde BAJA.
    - Pon el `phone_number_id` en `wa_phone_number_id` de la clínica.
-4. **Llamadas**, una de dos:
+5. **Llamadas**, una de dos:
    - **Centralita con webhooks**: que haga `POST https://tu-dominio/webhooks/llamada` con la cabecera
      `X-Webhook-Token: <CALL_WEBHOOK_TOKEN>` y el cuerpo
      `{"to": "+34910000000", "from": "+34600111222", "id": "id-unico", "estado": "perdida"}`
@@ -104,16 +114,28 @@ python -m pytest -q
      pon `TWILIO_AUTH_TOKEN` y en la clínica `numeros_llamada` (el de Twilio) y `telefono_recepcion`
      (al que se pasa la llamada). Twilio hace sonar recepción y, si nadie coge, avisa al paciente
      de que le escribirán por WhatsApp.
-5. **Avisos**: crea un bot con @BotFather → `TELEGRAM_BOT_TOKEN`. Añádelo al grupo de recepción y pon
+6. **Avisos**: crea un bot con @BotFather → `TELEGRAM_BOT_TOKEN`. Añádelo al grupo de recepción y pon
    el id del grupo en `telegram_chat_id` de la clínica. `OWNER_TELEGRAM_CHAT_ID` recibe los leads de la landing.
-6. **Privacidad**: completa `web/privacidad.html` y firma el contrato de encargado del tratamiento
+7. **Privacidad**: completa `web/privacidad.html` y firma el contrato de encargado del tratamiento
    con cada clínica.
+
+## Alta de una clínica nueva
+
+1. Tras la demo, envía a la clínica el enlace `https://tu-dominio/alta`. Rellena servicios con
+   precio, horario, preguntas frecuentes (seguros, parking, financiación…) y cómo debe hablar el asistente.
+2. Te llega un aviso por Telegram. En `/admin → Fichas de alta` ves la ficha y **lo que leerá el
+   asistente**. Pulsa *Crear clínica*: se crea inactiva y con su código para el panel de recepción.
+3. Conecta su WhatsApp y pon el `wa_phone_number_id` en Supabase (*Table Editor → schema `rp` →
+   `clinics`*). Desde ahí puedes retocar precios, horario o instrucciones cuando quieras: se aplica al momento.
+4. En `/admin → Clínicas`, *Activar*. El dashboard muestra por clínica las llamadas perdidas,
+   los WhatsApp enviados, las conversaciones y las citas pedidas de los últimos 30 días.
 
 ## Estructura
 
 ```
 app/
-  main.py        rutas: webhooks, panel, leads, simulador
+  main.py        rutas: webhooks, panel, admin, altas, leads, simulador
+  onboarding.py  ficha de alta -> clínica (texto que lee el asistente)
   service.py     reglas: llamadas perdidas, mensajes entrantes, bucle de tareas
   agent.py       prompt + herramientas del asistente
   llm.py         cliente de Gemini (function calling)
@@ -121,9 +143,9 @@ app/
   telephony.py   Twilio (firma, TwiML) y webhook genérico
   safety.py      urgencias y bajas por reglas
   hours.py       horarios y franja de envío
-  db.py          SQLite
-web/             landing, panel de recepción, privacidad
-tests/           27 tests (lógica + HTTP)
+  db.py          Supabase/Postgres o SQLite, mismas consultas
+web/             landing, ficha de alta, dashboard admin, panel de recepción, privacidad
+tests/           31 tests (lógica, HTTP, alta de clínicas)
 ```
 
 ## Siguiente paso

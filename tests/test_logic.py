@@ -110,7 +110,7 @@ def test_failed_delivery_asks_for_callback(db, make_agent):
     agent, _ = make_agent()
     service.register_missed_call(db, CLINIC, "600111222", "call-1")
     run(service.tick(db, agent, t=now() + 1000))
-    wa_id = db._one("SELECT wa_id FROM missed_calls")["wa_id"]
+    wa_id = db._one("SELECT wa_id FROM {T}missed_calls")["wa_id"]
     ev = Inbound(kind="status", phone_number_id="PNID1", phone="+34600111222", wa_id=wa_id,
                  status="failed", error_code=131026)
     assert run(service.handle_inbound(db, agent, ev)) == "plantilla no entregada"

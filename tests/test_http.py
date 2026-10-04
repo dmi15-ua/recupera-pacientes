@@ -14,6 +14,8 @@ from conftest import CLINIC, OTHER
 @pytest.fixture
 def client():
     with TestClient(app) as c:
+        from conftest import reset
+        reset(app.state.db)
         app.state.db.upsert_clinic(CLINIC)
         app.state.db.upsert_clinic(OTHER)
         yield c
@@ -70,7 +72,7 @@ def test_twilio_dial_flow(client):
     assert r.status_code == 401
     r = client.post("/webhooks/twilio/fin", data=params, headers={"X-Twilio-Signature": twilio_sign(url, params)})
     assert r.status_code == 200 and "WhatsApp" in r.text
-    row = app.state.db._one("SELECT * FROM missed_calls WHERE call_ref = 'CA1'")
+    row = app.state.db._one("SELECT * FROM {T}missed_calls WHERE call_ref = 'CA1'")
     assert row["phone"] == "+34600777666" and row["clinic_id"] == "c1"
 
 
@@ -86,7 +88,7 @@ def test_lead_form(client):
     assert client.post("/api/leads", json={**base, "acepta": False}).status_code == 400
     assert client.post("/api/leads", json=base).json() == {"ok": True}
     assert client.post("/api/leads", json={**base, "web": "http://spam"}).json() == {"ok": True}
-    assert app.state.db._one("SELECT COUNT(*) n FROM leads")["n"] == 1
+    assert app.state.db._one("SELECT COUNT(*) n FROM {T}leads")["n"] == 1
 
 
 def test_panel_isolated_per_clinic(client):

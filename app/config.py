@@ -22,6 +22,8 @@ def _bool(nombre: str, defecto: bool) -> bool:
 
 @dataclass
 class Settings:
+    database_url: str
+    db_schema: str
     database_path: str
     clinics_file: str
     public_base_url: str
@@ -63,6 +65,9 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
+            # Supabase: Project Settings -> Database -> Connection string (URI).
+            database_url=os.getenv("DATABASE_URL", ""),
+            db_schema=os.getenv("DB_SCHEMA", "rp"),
             database_path=os.getenv("DATABASE_PATH", "data/app.db"),
             clinics_file=os.getenv("CLINICS_FILE", "clinicas.json"),
             public_base_url=os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/"),

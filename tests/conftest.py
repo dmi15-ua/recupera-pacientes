@@ -3,10 +3,20 @@ import os
 import sys
 import tempfile
 
+from dotenv import load_dotenv
+
+# Permite poner TEST_DATABASE_URL en el .env.
+load_dotenv()
+
 # La configuración se lee al importar: hay que fijar el entorno antes.
 _tmp = tempfile.mkdtemp()
 os.environ.update({
     "DATABASE_PATH": os.path.join(_tmp, "test.db"),
+    # Con TEST_DATABASE_URL=postgresql://... los tests corren contra Postgres
+    # (por ejemplo, un proyecto de Supabase de pruebas). Sin ella, SQLite.
+    # Se usa un schema aparte (rp_test): los tests BORRAN sus tablas.
+    "DATABASE_URL": os.getenv("TEST_DATABASE_URL", ""),
+    "DB_SCHEMA": "rp_test",
     "CLINICS_FILE": os.path.join(_tmp, "no-existe.json"),
     "PUBLIC_BASE_URL": "https://test.local",
     "WA_TOKEN": "",
@@ -71,9 +81,27 @@ def run(coro):
     return asyncio.run(coro)
 
 
+TABLES = ["messages", "conversations", "missed_calls", "optouts", "requests", "leads",
+          "clinic_applications", "clinics"]
+
+
+def reset(d):
+    for t in TABLES:
+        d._exec(f"DELETE FROM {{T}}{t}")
+
+
+_pg = None
+
+
 @pytest.fixture
 def db():
-    d = Database(":memory:")
+    global _pg
+    if os.getenv("TEST_DATABASE_URL"):
+        _pg = _pg or Database(os.environ["TEST_DATABASE_URL"], "rp_test")
+        d = _pg
+        reset(d)
+    else:
+        d = Database(":memory:")
     d.upsert_clinic(CLINIC)
     d.upsert_clinic(OTHER)
     whatsapp.outbox.clear()
