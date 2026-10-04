@@ -37,8 +37,8 @@ Llamada perdida ──► espera 2 min ──► ¿hay que escribir? ──► p
 
 | Pieza | Coste |
 |---|---|
-| Base de datos | Supabase, plan gratuito (de sobra para decenas de clínicas). |
-| Servidor | Railway (unos 5 $/mes) o el nivel gratuito de Oracle Cloud. El servidor no guarda datos: todo va a Supabase. |
+| Base de datos | Postgres en Railway (entra en el consumo del plan) o Supabase gratis. |
+| Servidor | Railway (unos 5 $/mes) o el nivel gratuito de Oracle Cloud. El servidor no guarda datos: todo va a Postgres. |
 | WhatsApp | Las respuestas al paciente son gratis. Se paga la plantilla inicial (céntimos por llamada perdida; mira la tabla de precios de Meta para España). |
 | LLM | Gemini Flash-Lite: fracciones de céntimo por conversación. **Con facturación activada** (el nivel gratis puede usar los datos para entrenar). |
 | Avisos | Telegram: gratis. |
@@ -81,14 +81,18 @@ Tests (con SQLite):
 python -m pytest -q
 ```
 
-Para pasarlos también contra Postgres, pon `TEST_DATABASE_URL` con la URL de Supabase. Usan el
+Para pasarlos también contra Postgres, pon `TEST_DATABASE_URL` con una URL accesible desde tu
+ordenador (en Railway, `DATABASE_PUBLIC_URL`). Usan el
 schema `rp_test`, que borran entero; nunca tocan `rp`.
 
 ## Poner en producción
 
-1. **Base de datos (Supabase)**: copia la URL de conexión en *Project Settings → Database →
-   Connection string → URI*, modo **Session pooler** → `DATABASE_URL`. Al arrancar, la app crea
-   sus tablas en el schema `rp` (no toca nada de `public`). Elige un proyecto en una región de la UE.
+1. **Base de datos (Postgres)**: vale cualquiera. Al arrancar, la app crea sus tablas en el
+   schema `rp` (no toca nada de `public`, donde puede haber otras cosas, como n8n).
+   - **Railway**: añade un servicio Postgres al proyecto y, en las variables de la app, pon
+     `DATABASE_URL=${{Postgres.DATABASE_URL}}`. Las tablas se ven en la pestaña *Data* del Postgres
+     y en `/admin`.
+   - **Supabase**: *Connect → URI*, modo **Session pooler** → `DATABASE_URL`.
 2. **Servidor (Railway)**: crea un servicio desde el repo (usa el `Dockerfile`), pon las variables
    de `.env.example` y un dominio. **Una sola réplica**: el bucle de tareas vive dentro del proceso.
    No hace falta volumen.

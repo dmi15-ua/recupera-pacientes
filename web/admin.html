@@ -116,7 +116,7 @@ function render(){
 }
 
 function renderClinics(v){
-  v.append(el('p', 'hint', 'Últimos 30 días. Para editar precios, horario o el WhatsApp de una clínica: Supabase → Table Editor → schema "rp" → tabla "clinics".'));
+  v.append(el('p', 'hint', 'Últimos 30 días. Para editar precios, horario o el WhatsApp de una clínica: tabla rp.clinics de la base de datos (pestaña Data de Postgres en Railway, o Table Editor en Supabase).'));
   if (!data.clinicas.length) return v.append(el('div', 'empty', 'Aún no hay clínicas. Convierte una ficha de alta para crear la primera.'));
   const grid = el('div', 'cards');
   for (const c of data.clinicas){
