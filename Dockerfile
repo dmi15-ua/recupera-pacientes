@@ -9,9 +9,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY web ./web
 
-# La base de datos vive en /app/data: monta ahí un volumen para no perderla.
-VOLUME ["/app/data"]
+# Sin VOLUME: Railway no lo admite en el Dockerfile. Con DATABASE_URL (Postgres)
+# no hace falta disco; si usas SQLite, monta un volumen en /app/data desde la
+# plataforma.
 EXPOSE 8000
 
-# Un solo proceso: SQLite + bucle de tareas interno.
+# Un solo proceso: el bucle de tareas vive dentro.
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers"]
