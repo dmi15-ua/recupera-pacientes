@@ -140,7 +140,7 @@ def build_instrucciones(app: Dict[str, Any]) -> str:
     if app.get("instrucciones"):
         parts.append(app["instrucciones"].strip())
     if app.get("prohibiciones"):
-        parts.append("NUNCA hables de lo siguiente (si preguntan, di que lo consulten con el equipo): "
+        parts.append("NUNCA hables de lo siguiente; si preguntan, di que no puedes informar de eso y usa anotar_duda para que recepción le responda: "
                      + app["prohibiciones"].strip())
     return "\n".join(parts)
 
