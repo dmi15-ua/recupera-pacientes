@@ -404,7 +404,7 @@ async def panel_reply(conv_id: int, body: ReplyIn, request: Request, authorizati
     # mensaje del paciente.
     if not conv["last_patient_at"] or now() - conv["last_patient_at"] > 24 * 3600:
         raise HTTPException(409, "Han pasado más de 24 h desde el último mensaje del paciente: llámale.")
-    res = await whatsapp.send_text(c["wa_phone_number_id"], conv["phone"], body.texto)
+    res = await whatsapp.send_text(c.get("wa_phone_number_id", ""), conv["phone"], body.texto)
     if not res.ok:
         raise HTTPException(502, f"WhatsApp no aceptó el mensaje: {res.error}")
     db = _db(request)
@@ -440,49 +440,85 @@ def panel_request_done(req_id: int, request: Request, authorization: str = Heade
     return {"ok": True}
 
 
-# ------------------------------------------------------- simulador (local)
+# ------------------------------------------------------------ simulador
+# Solo funciona mientras WhatsApp está en modo simulación (sin WA_TOKEN). Sirve
+# para probar el agente de verdad (con Gemini y la ficha real de una clínica)
+# antes de conectar Meta. Lo usa la pestaña "Probar" de /admin.
 class DevIn(BaseModel):
     clinica_id: str
-    telefono: str
-    texto: Optional[str] = None
+    telefono: str = Field(..., min_length=6, max_length=30)
+    texto: Optional[str] = Field(None, max_length=2000)
 
 
 def _dev_guard(authorization: str) -> None:
+    _admin(authorization)
     if not whatsapp.dry_run:
-        raise HTTPException(404)
-    if not settings.admin_token or not secrets.compare_digest(
-            authorization.removeprefix("Bearer ").strip(), settings.admin_token):
-        raise HTTPException(401)
+        raise HTTPException(409, "El simulador solo funciona sin WA_TOKEN: con WhatsApp real, prueba desde tu móvil.")
+
+
+def _dev_clinic(request: Request, clinic_id: str) -> Dict:
+    clinic = _db(request).get_clinic(clinic_id)
+    if not clinic:
+        raise HTTPException(404, "Clínica no encontrada")
+    return clinic
+
+
+def _dev_state(db: Database, clinic: Dict, phone: str) -> Dict:
+    conv = db.last_conversation(clinic["id"], phone)
+    if not conv:
+        return {}
+    reqs = [r for r in db.list_requests(clinic["id"], only_open=False) if r["conversation_id"] == conv["id"]]
+    return {"modo": conv["mode"], "estado": conv["status"], "abierta": bool(conv["open"]),
+            "solicitudes": [{"tipo": r["kind"], "nombre": r["name"], "detalle": r["detail"],
+                             "preferencia": r["preference"]} for r in reqs]}
 
 
 @app.post("/api/dev/llamada")
 async def dev_call(body: DevIn, request: Request, authorization: str = Header("")):
-    """Simula una llamada perdida y la procesa sin esperar."""
+    """Simula una llamada perdida y la procesa al momento (sin esperar ni franja horaria)."""
     _dev_guard(authorization)
     db = _db(request)
-    clinic = db.get_clinic(body.clinica_id)
-    if not clinic:
-        raise HTTPException(404)
-    r =service.register_missed_call(db, clinic, body.telefono, f"dev-{time.time()}")
-    db._exec("UPDATE missed_calls SET send_after = 0 WHERE status = 'pendiente'")
-    await service.tick(db, request.app.state.agent, t=now())
-    return {"registro": r, "salida": whatsapp.outbox[-3:]}
+    clinic = _dev_clinic(request, body.clinica_id)
+    phone = normalize(body.telefono)
+    ref = f"sim-{time.time()}"
+    r = service.register_missed_call(db, clinic, phone, ref)
+    if r != "registrada":
+        return {"resultado": r, "mensajes": [], "estado": _dev_state(db, clinic, phone)}
+    call = db._one("SELECT * FROM {T}missed_calls WHERE clinic_id = ? AND call_ref = ?", (clinic["id"], ref))
+    r = await service.process_missed_call(db, call, now(), allow_inactive=True)
+    msgs = [service.template_text(clinic)] if r == "enviado" else []
+    return {"resultado": r, "mensajes": msgs, "estado": _dev_state(db, clinic, phone)}
 
 
 @app.post("/api/dev/mensaje")
 async def dev_message(body: DevIn, request: Request, authorization: str = Header("")):
-    """Simula que el paciente escribe y devuelve la respuesta del agente."""
+    """Simula que el paciente escribe y devuelve lo que contestaría el agente."""
     _dev_guard(authorization)
     from app.whatsapp import Inbound
     db = _db(request)
-    clinic = db.get_clinic(body.clinica_id)
-    if not clinic:
-        raise HTTPException(404)
+    clinic = _dev_clinic(request, body.clinica_id)
+    phone = normalize(body.telefono)
     before = len(whatsapp.outbox)
-    ev = Inbound(kind="message", phone_number_id=clinic["wa_phone_number_id"], phone=normalize(body.telefono),
-                 wa_id=f"dev-{time.time()}", text=body.texto, media_type="text")
-    r = await service.handle_inbound(db, request.app.state.agent, ev)
-    conv = db.open_conversation(clinic["id"], normalize(body.telefono))
+    ev = Inbound(kind="message", phone_number_id=clinic.get("wa_phone_number_id", ""), phone=phone,
+                 wa_id=f"sim-{time.time()}", text=body.texto, media_type="text")
+    r = await service.handle_inbound(db, request.app.state.agent, ev, clinic=clinic, allow_inactive=True)
+    conv = db.open_conversation(clinic["id"], phone)
     if conv and conv["reply_due_at"]:
         await service.process_reply(db, request.app.state.agent, conv)
-    return {"resultado": r, "respuestas": [m.get("text", {}).get("body") for m in whatsapp.outbox[before:]]}
+    msgs = [m.get("text", {}).get("body") for m in whatsapp.outbox[before:]]
+    return {"resultado": r, "mensajes": [m for m in msgs if m], "estado": _dev_state(db, clinic, phone)}
+
+
+@app.post("/api/dev/reiniciar")
+def dev_reset(body: DevIn, request: Request, authorization: str = Header("")):
+    """Cierra la conversación simulada y quita la baja, para empezar de cero."""
+    _dev_guard(authorization)
+    db = _db(request)
+    clinic = _dev_clinic(request, body.clinica_id)
+    phone = normalize(body.telefono)
+    db._exec("UPDATE {T}conversations SET open = 0, reply_due_at = NULL WHERE clinic_id = ? AND phone = ?",
+             (clinic["id"], phone))
+    db._exec("DELETE FROM {T}optouts WHERE clinic_id = ? AND phone = ?", (clinic["id"], phone))
+    db._exec("UPDATE {T}missed_calls SET status = 'omitido', reason = 'simulador reiniciado' "
+             "WHERE clinic_id = ? AND phone = ? AND status = 'pendiente'", (clinic["id"], phone))
+    return {"ok": True}

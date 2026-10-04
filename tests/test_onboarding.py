@@ -97,3 +97,22 @@ def test_inactive_clinic_does_not_answer(client):
     db.set_clinic_active("c1", False)
     ev = Inbound(kind="message", phone_number_id="PNID1", phone="+34600000001", wa_id="z1", text="hola")
     assert run(service.handle_inbound(db, Agent(db, FakeLLM()), ev)) == "ignorado: clínica inactiva"
+
+
+def test_simulator_on_new_inactive_clinic(client):
+    from app.agent import FALLBACK_REPLY
+    app_id = client.post("/api/altas", json=FICHA).json()["id"]
+    cid = client.post(f"/api/admin/altas/{app_id}/convertir", headers=ADMIN).json()["clinica_id"]
+    body = {"clinica_id": cid, "telefono": "600999000"}
+    assert client.post("/api/dev/llamada", json=body).status_code == 401
+
+    r = client.post("/api/dev/llamada", json=body, headers=ADMIN).json()
+    assert r["resultado"] == "enviado" and "Clínica Dental Sol" in r["mensajes"][0]
+
+    r = client.post("/api/dev/mensaje", json={**body, "texto": "me cuesta respirar"}, headers=ADMIN).json()
+    assert r["resultado"] == "urgencia" and r["estado"]["solicitudes"][0]["tipo"] == "urgencia"
+
+    client.post("/api/dev/reiniciar", json=body, headers=ADMIN)
+    r = client.post("/api/dev/mensaje", json={**body, "texto": "hola"}, headers=ADMIN).json()
+    # Sin GEMINI_API_KEY en los tests: respuesta de reserva y pasa a recepción.
+    assert r["mensajes"] == [FALLBACK_REPLY] and r["estado"]["modo"] == "human"

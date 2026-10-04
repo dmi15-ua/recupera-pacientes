@@ -57,7 +57,7 @@ def template_text(clinic: Dict[str, Any]) -> str:
     return tpl.get("texto", DEFAULT_TEMPLATE_TEXT).replace("{clinica}", clinic["nombre"])
 
 
-async def process_missed_call(db: Database, call: Dict[str, Any], t: int) -> str:
+async def process_missed_call(db: Database, call: Dict[str, Any], t: int, allow_inactive: bool = False) -> str:
     clinic = db.get_clinic(call["clinic_id"])
     phone = call["phone"]
 
@@ -65,7 +65,7 @@ async def process_missed_call(db: Database, call: Dict[str, Any], t: int) -> str
         db.set_missed_status(call["id"], "omitido", reason)
         return f"omitido: {reason}"
 
-    if not clinic or not clinic.get("activa", True):
+    if not clinic or (not clinic.get("activa", True) and not allow_inactive):
         return skip("clínica inactiva")
     if db.is_opted_out(clinic["id"], phone):
         return skip("el paciente pidió la baja")
@@ -92,7 +92,7 @@ async def process_missed_call(db: Database, call: Dict[str, Any], t: int) -> str
 
     tpl = clinic.get("plantilla", {})
     res = await whatsapp.send_template(
-        clinic["wa_phone_number_id"], phone,
+        clinic.get("wa_phone_number_id", ""), phone,
         tpl.get("nombre", "llamada_perdida"), tpl.get("idioma", "es"),
         [clinic["nombre"]] if tpl.get("con_nombre_clinica", True) else [],
     )
@@ -132,11 +132,13 @@ async def _transcribe(media_id: str, mime: str) -> Optional[str]:
     return resp.text if resp.ok and resp.text else None
 
 
-async def handle_inbound(db: Database, agent: Agent, ev: Inbound) -> str:
-    clinic = db.clinic_by_wa_number(ev.phone_number_id)
+async def handle_inbound(db: Database, agent: Agent, ev: Inbound,
+                         clinic: Optional[Dict[str, Any]] = None, allow_inactive: bool = False) -> str:
+    """`clinic` y `allow_inactive` solo los usa el simulador de /admin."""
+    clinic = clinic or db.clinic_by_wa_number(ev.phone_number_id)
     if not clinic:
         return "ignorado: número de WhatsApp sin clínica"
-    if not clinic.get("activa", True):
+    if not clinic.get("activa", True) and not allow_inactive:
         return "ignorado: clínica inactiva"
 
     if ev.kind == "status":
@@ -207,7 +209,7 @@ async def _handle_status(db: Database, clinic: Dict[str, Any], ev: Inbound) -> s
 
 
 async def _reply_fixed(db: Database, clinic: Dict[str, Any], conv: Dict[str, Any], text: str) -> None:
-    res = await whatsapp.send_text(clinic["wa_phone_number_id"], conv["phone"], text)
+    res = await whatsapp.send_text(clinic.get("wa_phone_number_id", ""), conv["phone"], text)
     db.add_message(conv["id"], "bot", text, wa_id=res.wa_id if res.ok else None)
 
 
