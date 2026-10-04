@@ -1,0 +1,370 @@
+"""Rutas HTTP y arranque.
+
+Arrancar con UN solo proceso (uvicorn sin --workers): la base de datos es
+SQLite y el bucle de tareas vive dentro del proceso.
+"""
+import asyncio
+import json
+import logging
+import os
+import re
+import secrets
+import time
+from contextlib import asynccontextmanager
+from typing import Dict, List, Optional
+
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
+from fastapi.responses import FileResponse, PlainTextResponse, Response
+from pydantic import BaseModel, Field
+
+from app import service, telephony
+from app.agent import Agent
+from app.config import settings
+from app.db import Database, now
+from app.notify import notify_owner
+from app.phone import normalize
+from app.whatsapp import parse_webhook, verify_signature, whatsapp
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# httpx registra cada URL a nivel INFO; no aporta y llena el log.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+log = logging.getLogger("app")
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WEB = os.path.join(ROOT, "web")
+
+
+def load_clinics(db: Database, path: str) -> int:
+    if not os.path.exists(path):
+        log.warning("No existe %s: no hay clínicas configuradas", path)
+        return 0
+    with open(path, encoding="utf-8") as f:
+        clinics = json.load(f)
+    for c in clinics:
+        db.upsert_clinic(c)
+    return len(clinics)
+
+
+async def worker_loop(app: FastAPI) -> None:
+    last_maintenance = 0.0
+    while True:
+        try:
+            await service.tick(app.state.db, app.state.agent)
+            if time.time() - last_maintenance > 3600:
+                service.maintenance(app.state.db)
+                last_maintenance = time.time()
+        except Exception:
+            log.exception("Error en el bucle de tareas")
+        await asyncio.sleep(2)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.db = Database(settings.database_path)
+    app.state.agent = Agent(app.state.db)
+    n = load_clinics(app.state.db, settings.clinics_file)
+    log.info("Clínicas cargadas: %s. WhatsApp %s. LLM %s.", n,
+             "SIMULADO" if whatsapp.dry_run else "real",
+             settings.gemini_model if settings.gemini_api_key else "sin key")
+    task = None
+    if os.getenv("DISABLE_WORKER") != "1":
+        task = asyncio.create_task(worker_loop(app))
+    yield
+    if task:
+        task.cancel()
+
+
+app = FastAPI(title="RecuperaPacientes", lifespan=lifespan, docs_url=None, redoc_url=None)
+
+
+def _db(request: Request) -> Database:
+    return request.app.state.db
+
+
+# ------------------------------------------------------------------ páginas
+@app.get("/", include_in_schema=False)
+def landing():
+    return FileResponse(os.path.join(WEB, "index.html"))
+
+
+@app.get("/panel", include_in_schema=False)
+def panel_page():
+    return FileResponse(os.path.join(WEB, "panel.html"))
+
+
+@app.get("/privacidad", include_in_schema=False)
+def privacy_page():
+    return FileResponse(os.path.join(WEB, "privacidad.html"))
+
+
+@app.get("/salud")
+def health():
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- WhatsApp
+@app.get("/webhooks/whatsapp")
+def wa_verify(request: Request):
+    q = request.query_params
+    if (settings.wa_verify_token and q.get("hub.mode") == "subscribe"
+            and secrets.compare_digest(q.get("hub.verify_token", ""), settings.wa_verify_token)):
+        return PlainTextResponse(q.get("hub.challenge", ""))
+    raise HTTPException(403)
+
+
+@app.post("/webhooks/whatsapp")
+async def wa_webhook(request: Request, background: BackgroundTasks):
+    raw = await request.body()
+    if not verify_signature(raw, request.headers.get("X-Hub-Signature-256")):
+        raise HTTPException(401, "firma no válida")
+    events = parse_webhook(json.loads(raw or b"{}"))
+    # Se responde 200 ya; Meta reintenta si tardamos y eso duplicaría mensajes.
+    for ev in events:
+        background.add_task(service.handle_inbound, _db(request), request.app.state.agent, ev)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- llamadas
+class CallEvent(BaseModel):
+    to: Optional[str] = None
+    clinica_id: Optional[str] = None
+    from_: str = Field(..., alias="from")
+    id: str
+    estado: str = "perdida"
+
+
+@app.post("/webhooks/llamada")
+def generic_call(request: Request, ev: CallEvent, x_webhook_token: str = Header("")):
+    if not settings.call_webhook_token:
+        raise HTTPException(503, "Define CALL_WEBHOOK_TOKEN para activar esta ruta")
+    if not secrets.compare_digest(x_webhook_token, settings.call_webhook_token):
+        raise HTTPException(401)
+    db = _db(request)
+    clinic = db.get_clinic(ev.clinica_id) if ev.clinica_id else db.clinic_by_called_number(normalize(ev.to))
+    if not clinic:
+        raise HTTPException(404, "No hay clínica para ese número")
+    if ev.estado == "atendida":
+        return {"canceladas": service.register_answered_call(db, clinic, ev.from_)}
+    return {"resultado": service.register_missed_call(db, clinic, ev.from_, ev.id)}
+
+
+async def _twilio_params(request: Request) -> Dict[str, str]:
+    form = await request.form()
+    params = {k: str(v) for k, v in form.items()}
+    url = settings.public_base_url + request.url.path
+    if request.url.query:
+        url += "?" + request.url.query
+    if not telephony.twilio_signature_ok(url, params, request.headers.get("X-Twilio-Signature", "")):
+        raise HTTPException(401, "firma de Twilio no válida")
+    return params
+
+
+def _xml(body: str) -> Response:
+    return Response(body, media_type="application/xml")
+
+
+@app.post("/webhooks/twilio/voz")
+async def twilio_voice(request: Request):
+    p = await _twilio_params(request)
+    clinic = _db(request).clinic_by_called_number(normalize(p.get("To")))
+    if not clinic or not clinic.get("telefono_recepcion"):
+        return _xml(telephony.twiml_say_and_hangup("Este número no está disponible."))
+    return _xml(telephony.twiml_dial(clinic["telefono_recepcion"],
+                                     settings.public_base_url + "/webhooks/twilio/fin",
+                                     int(clinic.get("segundos_espera", 20))))
+
+
+@app.post("/webhooks/twilio/fin")
+async def twilio_dial_end(request: Request):
+    p = await _twilio_params(request)
+    db = _db(request)
+    clinic = db.clinic_by_called_number(normalize(p.get("To")))
+    if not clinic:
+        return _xml(telephony.twiml("<Hangup/>"))
+    if p.get("DialCallStatus") in telephony.DIAL_MISSED:
+        service.register_missed_call(db, clinic, p.get("From", ""), p.get("CallSid", ""))
+        return _xml(telephony.twiml_say_and_hangup(clinic.get("mensaje_voz", telephony.DEFAULT_MISSED_SAY)))
+    service.register_answered_call(db, clinic, p.get("From", ""))
+    return _xml(telephony.twiml("<Hangup/>"))
+
+
+# ------------------------------------------------------------------- leads
+_hits: Dict[str, List[float]] = {}
+
+
+def _client_ip(request: Request) -> str:
+    if settings.trust_proxy:
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            # El último salto lo añade nuestro proxy; los anteriores los
+            # puede inventar el cliente.
+            return fwd.split(",")[-1].strip()
+    return request.client.host if request.client else "?"
+
+
+def _rate_ok(ip: str, limit: int = 5, window: int = 600) -> bool:
+    t = time.time()
+    hits = [h for h in _hits.get(ip, []) if t - h < window]
+    if len(_hits) > 10000:
+        _hits.clear()
+    _hits[ip] = hits + [t]
+    return len(hits) < limit
+
+
+class LeadIn(BaseModel):
+    clinica: str = Field(..., min_length=2, max_length=160)
+    nombre: Optional[str] = Field(None, max_length=120)
+    telefono: str = Field(..., min_length=6, max_length=30)
+    email: Optional[str] = Field(None, max_length=160)
+    mensaje: Optional[str] = Field(None, max_length=1000)
+    web: Optional[str] = Field(None, max_length=200)  # trampa para bots
+    acepta: bool = False
+
+
+@app.post("/api/leads")
+async def create_lead(lead: LeadIn, request: Request):
+    if lead.web:
+        return {"ok": True}
+    if not _rate_ok(_client_ip(request)):
+        raise HTTPException(429, "Demasiados envíos. Prueba en unos minutos.")
+    if not lead.acepta:
+        raise HTTPException(400, "Necesitamos tu consentimiento para contactarte.")
+    phone = normalize(lead.telefono)
+    if len(re.sub(r"\D", "", phone)) < 9:
+        raise HTTPException(400, "Revisa el teléfono.")
+    if lead.email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", lead.email):
+        raise HTTPException(400, "Revisa el email.")
+    db = _db(request)
+    if not db.recent_lead(phone, now() - 86400):
+        db.add_lead(lead.clinica.strip(), lead.nombre, phone, lead.email, lead.mensaje)
+        await notify_owner(f"🆕 Nuevo interesado\nClínica: {lead.clinica}\nContacto: {lead.nombre or '-'}\n"
+                           f"Teléfono: {phone}\nEmail: {lead.email or '-'}\n{lead.mensaje or ''}")
+    return {"ok": True}
+
+
+# ------------------------------------------------------------------- panel
+def _panel_clinic(request: Request, authorization: str) -> Dict:
+    token = authorization.removeprefix("Bearer ").strip()
+    if token:
+        for c in _db(request).list_clinics():
+            if c.get("panel_token") and secrets.compare_digest(token, c["panel_token"]):
+                return c
+    raise HTTPException(401, "Token no válido")
+
+
+def _own_conversation(request: Request, clinic: Dict, conv_id: int) -> Dict:
+    conv = _db(request).get_conversation(conv_id)
+    if not conv or conv["clinic_id"] != clinic["id"]:
+        raise HTTPException(404)
+    return conv
+
+
+@app.get("/api/panel/resumen")
+def panel_summary(request: Request, authorization: str = Header("")):
+    c = _panel_clinic(request, authorization)
+    db = _db(request)
+    return {"clinica": c["nombre"], "conversaciones": db.list_conversations(c["id"]),
+            "solicitudes": db.list_requests(c["id"])}
+
+
+@app.get("/api/panel/conversaciones/{conv_id}")
+def panel_messages(conv_id: int, request: Request, authorization: str = Header("")):
+    c = _panel_clinic(request, authorization)
+    conv = _own_conversation(request, c, conv_id)
+    return {"conversacion": conv, "mensajes": _db(request).history(conv_id, 500)}
+
+
+class ReplyIn(BaseModel):
+    texto: str = Field(..., min_length=1, max_length=4000)
+
+
+@app.post("/api/panel/conversaciones/{conv_id}/responder")
+async def panel_reply(conv_id: int, body: ReplyIn, request: Request, authorization: str = Header("")):
+    c = _panel_clinic(request, authorization)
+    conv = _own_conversation(request, c, conv_id)
+    # Meta solo deja escribir texto libre en las 24 h siguientes al último
+    # mensaje del paciente.
+    if not conv["last_patient_at"] or now() - conv["last_patient_at"] > 24 * 3600:
+        raise HTTPException(409, "Han pasado más de 24 h desde el último mensaje del paciente: llámale.")
+    res = await whatsapp.send_text(c["wa_phone_number_id"], conv["phone"], body.texto)
+    if not res.ok:
+        raise HTTPException(502, f"WhatsApp no aceptó el mensaje: {res.error}")
+    db = _db(request)
+    db.add_message(conv_id, "staff", body.texto, wa_id=res.wa_id)
+    db.update_conversation(conv_id, mode="human", human_until=now() + settings.human_takeover_s,
+                           reply_due_at=None, open=1)
+    return {"ok": True}
+
+
+class ModeIn(BaseModel):
+    modo: str = Field(..., pattern="^(bot|human|cerrar)$")
+
+
+@app.post("/api/panel/conversaciones/{conv_id}/modo")
+def panel_mode(conv_id: int, body: ModeIn, request: Request, authorization: str = Header("")):
+    c = _panel_clinic(request, authorization)
+    _own_conversation(request, c, conv_id)
+    db = _db(request)
+    if body.modo == "cerrar":
+        db.update_conversation(conv_id, open=0, reply_due_at=None)
+    elif body.modo == "bot":
+        db.update_conversation(conv_id, mode="bot", human_until=None, status="abierta")
+    else:
+        db.update_conversation(conv_id, mode="human", human_until=now() + settings.human_takeover_s,
+                               reply_due_at=None)
+    return {"ok": True}
+
+
+@app.post("/api/panel/solicitudes/{req_id}/hecha")
+def panel_request_done(req_id: int, request: Request, authorization: str = Header("")):
+    c = _panel_clinic(request, authorization)
+    _db(request).close_request(c["id"], req_id)
+    return {"ok": True}
+
+
+# ------------------------------------------------------- simulador (local)
+class DevIn(BaseModel):
+    clinica_id: str
+    telefono: str
+    texto: Optional[str] = None
+
+
+def _dev_guard(authorization: str) -> None:
+    if not whatsapp.dry_run:
+        raise HTTPException(404)
+    if not settings.admin_token or not secrets.compare_digest(
+            authorization.removeprefix("Bearer ").strip(), settings.admin_token):
+        raise HTTPException(401)
+
+
+@app.post("/api/dev/llamada")
+async def dev_call(body: DevIn, request: Request, authorization: str = Header("")):
+    """Simula una llamada perdida y la procesa sin esperar."""
+    _dev_guard(authorization)
+    db = _db(request)
+    clinic = db.get_clinic(body.clinica_id)
+    if not clinic:
+        raise HTTPException(404)
+    r =service.register_missed_call(db, clinic, body.telefono, f"dev-{time.time()}")
+    db._exec("UPDATE missed_calls SET send_after = 0 WHERE status = 'pendiente'")
+    await service.tick(db, request.app.state.agent, t=now())
+    return {"registro": r, "salida": whatsapp.outbox[-3:]}
+
+
+@app.post("/api/dev/mensaje")
+async def dev_message(body: DevIn, request: Request, authorization: str = Header("")):
+    """Simula que el paciente escribe y devuelve la respuesta del agente."""
+    _dev_guard(authorization)
+    from app.whatsapp import Inbound
+    db = _db(request)
+    clinic = db.get_clinic(body.clinica_id)
+    if not clinic:
+        raise HTTPException(404)
+    before = len(whatsapp.outbox)
+    ev = Inbound(kind="message", phone_number_id=clinic["wa_phone_number_id"], phone=normalize(body.telefono),
+                 wa_id=f"dev-{time.time()}", text=body.texto, media_type="text")
+    r = await service.handle_inbound(db, request.app.state.agent, ev)
+    conv = db.open_conversation(clinic["id"], normalize(body.telefono))
+    if conv and conv["reply_due_at"]:
+        await service.process_reply(db, request.app.state.agent, conv)
+    return {"resultado": r, "respuestas": [m.get("text", {}).get("body") for m in whatsapp.outbox[before:]]}

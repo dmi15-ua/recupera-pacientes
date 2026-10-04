@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Panel de recepción · RecuperaPacientes</title>
+<style>
+:root{--bg:#F4F2EE;--surface:#fff;--ink:#13201D;--muted:#5B6764;--line:#E3DFD6;--green:#176B4D;--mint:#E4F1EA;--coral:#D9483B;--coral-soft:#FBE9E6;--amber:#9A6700;--amber-soft:#FFF4D6;--out:#D9FDD3;--staff:#DCEBFF}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+button{font:inherit;cursor:pointer;border:0;border-radius:10px;padding:9px 14px;font-weight:600}
+.primary{background:var(--green);color:#fff}
+.ghost{background:transparent;box-shadow:inset 0 0 0 1.5px var(--line);color:var(--ink)}
+.ghost:hover{box-shadow:inset 0 0 0 1.5px var(--ink)}
+input,textarea{font:inherit;border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;width:100%;background:#fff;color:var(--ink)}
+input:focus,textarea:focus{outline:none;border-color:var(--green)}
+#login{max-width:380px;margin:12vh auto;background:var(--surface);padding:28px;border-radius:18px;box-shadow:0 10px 40px -15px rgba(0,0,0,.2);display:grid;gap:14px}
+#login h1{margin:0;font-size:22px}
+#login p{margin:0;color:var(--muted)}
+.err{color:var(--coral);font-size:14px;min-height:18px}
+header{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2}
+header b{font-size:16px}
+header small{color:var(--muted);margin-left:8px}
+main{display:grid;grid-template-columns:360px 1fr;height:calc(100vh - 59px)}
+aside{border-right:1px solid var(--line);overflow:auto;background:var(--surface)}
+aside h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:18px 16px 8px}
+.req{margin:0 12px 10px;border-radius:12px;padding:12px;background:var(--mint);display:grid;gap:4px}
+.req.urgencia{background:var(--coral-soft)}
+.req.llamar,.req.humano{background:var(--amber-soft)}
+.req .k{font-weight:700;font-size:13.5px}
+.req .d{font-size:13.5px;color:var(--muted)}
+.req .acts{display:flex;gap:8px;margin-top:6px}
+.req button{padding:6px 10px;font-size:13px}
+.conv{display:block;width:100%;text-align:left;background:none;border-radius:0;border-bottom:1px solid var(--line);padding:12px 16px;font-weight:400}
+.conv:hover,.conv.sel{background:var(--bg)}
+.conv .top{display:flex;justify-content:space-between;gap:8px}
+.conv .top b{font-weight:600}
+.conv .last{color:var(--muted);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.b-bot{background:var(--mint);color:var(--green)}
+.b-human{background:var(--staff);color:#1E4E8C}
+.b-urgencia{background:var(--coral-soft);color:var(--coral)}
+.b-cerrada{background:#ECEAE5;color:var(--muted)}
+section{display:flex;flex-direction:column;min-width:0}
+.chathead{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--surface);flex-wrap:wrap}
+.chathead .acts{display:flex;gap:8px;flex-wrap:wrap}
+.msgs{flex:1;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:8px;background:#EFEAE2}
+.m{max-width:70%;padding:8px 12px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word;box-shadow:0 1px .5px rgba(0,0,0,.1)}
+.m small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+.patient{align-self:flex-start;background:#fff}
+.bot{align-self:flex-end;background:var(--out)}
+.staff{align-self:flex-end;background:var(--staff)}
+.compose{display:flex;gap:10px;padding:12px;border-top:1px solid var(--line);background:var(--surface)}
+.compose textarea{min-height:44px;max-height:160px;resize:vertical}
+.empty{margin:auto;color:var(--muted);text-align:center;padding:24px}
+.back{display:none}
+@media(max-width:800px){
+  main{grid-template-columns:1fr}
+  main.open aside{display:none}
+  main:not(.open) section{display:none}
+  .back{display:inline-block}
+  .m{max-width:88%}
+}
+</style>
+</head>
+<body>
+
+<form id="login" hidden>
+  <h1>Panel de recepción</h1>
+  <p>Introduce el código de acceso de tu clínica.</p>
+  <input id="token" type="password" autocomplete="current-password" placeholder="Código de acceso" required>
+  <button class="primary" type="submit">Entrar</button>
+  <div class="err" id="loginErr"></div>
+</form>
+
+<div id="app" hidden>
+  <header>
+    <div><b id="clinicName"></b><small id="updated"></small></div>
+    <button class="ghost" id="logout">Salir</button>
+  </header>
+  <main id="main">
+    <aside>
+      <h2>Pendiente</h2>
+      <div id="requests"></div>
+      <h2>Conversaciones</h2>
+      <div id="convs"></div>
+    </aside>
+    <section>
+      <div id="chat" class="empty">Elige una conversación</div>
+    </section>
+  </main>
+</div>
+
+<script>
+const KIND = {cita: '📅 Solicitud de cita', urgencia: '🚨 Urgencia', humano: '🙋 Quiere hablar con alguien', llamar: '📞 Devolver llamada'};
+let token = '';
+try { token = localStorage.getItem('rp_token') || ''; } catch (e) {}
+let current = null;
+
+const $ = id => document.getElementById(id);
+function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+const fmt = t => new Date(t * 1000).toLocaleString('es-ES', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
+
+async function api(path, opts = {}){
+  const r = await fetch(path, {...opts, headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}});
+  if (r.status === 401){ showLogin('Código no válido.'); throw new Error('401'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || 'Error ' + r.status);
+  return j;
+}
+
+function showLogin(err){
+  $('app').hidden = true; $('login').hidden = false; $('loginErr').textContent = err || '';
+}
+
+$('login').addEventListener('submit', e => {
+  e.preventDefault();
+  token = $('token').value.trim();
+  try { localStorage.setItem('rp_token', token); } catch (e) {}
+  load();
+});
+$('logout').onclick = () => { token = ''; try { localStorage.removeItem('rp_token'); } catch (e) {} showLogin(); };
+
+function badge(c){
+  if (!c.open) return el('span', 'badge b-cerrada', 'Cerrada');
+  if (c.status === 'urgencia') return el('span', 'badge b-urgencia', 'Urgencia');
+  if (c.mode === 'human') return el('span', 'badge b-human', 'Recepción');
+  return el('span', 'badge b-bot', 'Asistente');
+}
+
+async function load(){
+  if (!token){ showLogin(); return; }
+  let data;
+  try { data = await api('/api/panel/resumen'); } catch (e) { return; }
+  $('login').hidden = true; $('app').hidden = false;
+  $('clinicName').textContent = data.clinica;
+  $('updated').textContent = 'actualizado ' + new Date().toLocaleTimeString('es-ES', {hour: '2-digit', minute: '2-digit'});
+
+  const reqs = $('requests'); reqs.replaceChildren();
+  if (!data.solicitudes.length) reqs.append(el('div', 'empty', 'Nada pendiente 🎉'));
+  for (const r of data.solicitudes){
+    const box = el('div', 'req ' + r.kind);
+    box.append(el('div', 'k', KIND[r.kind] || r.kind));
+    box.append(el('div', 'd', [r.name, r.phone].filter(Boolean).join(' · ')));
+    if (r.detail) box.append(el('div', 'd', r.detail));
+    if (r.preference) box.append(el('div', 'd', 'Prefiere: ' + r.preference));
+    const acts = el('div', 'acts');
+    const ver = el('button', 'ghost', 'Ver chat'); ver.onclick = () => openConv(r.conversation_id);
+    const done = el('button', 'primary', 'Hecho'); done.onclick = async () => { await api(`/api/panel/solicitudes/${r.id}/hecha`, {method: 'POST'}); load(); };
+    acts.append(ver, done); box.append(acts); reqs.append(box);
+  }
+
+  const list = $('convs'); list.replaceChildren();
+  for (const c of data.conversaciones){
+    const b = el('button', 'conv' + (current === c.id ? ' sel' : ''));
+    const top = el('div', 'top'); top.append(el('b', '', c.name || c.phone), badge(c));
+    b.append(top, el('div', 'last', c.last_message || ''));
+    b.onclick = () => openConv(c.id);
+    list.append(b);
+  }
+  if (current) renderConv(current, false);
+}
+
+async function openConv(id){ current = id; $('main').classList.add('open'); await renderConv(id, true); load(); }
+
+async function renderConv(id, scroll){
+  let data;
+  try { data = await api(`/api/panel/conversaciones/${id}`); } catch (e) { return; }
+  const c = data.conversacion;
+  const box = $('chat'); box.className = ''; box.style.cssText = 'display:flex;flex-direction:column;height:100%';
+  const prevScroll = box.querySelector('.msgs');
+  const keepBottom = scroll || (prevScroll && prevScroll.scrollTop + prevScroll.clientHeight >= prevScroll.scrollHeight - 30);
+  const draft = box.querySelector('textarea')?.value || '';
+
+  const head = el('div', 'chathead');
+  const who = el('div');
+  const back = el('button', 'ghost back', '←'); back.onclick = () => { $('main').classList.remove('open'); current = null; };
+  who.append(back, ' ', el('b', '', c.name || 'Paciente'), ' ', el('span', '', c.phone), ' ', badge(c));
+  const acts = el('div', 'acts');
+  const mode = async m => { await api(`/api/panel/conversaciones/${id}/modo`, {method: 'POST', body: JSON.stringify({modo: m})}); load(); };
+  if (c.mode === 'human'){ const b = el('button', 'ghost', 'Devolver al asistente'); b.onclick = () => mode('bot'); acts.append(b); }
+  else { const b = el('button', 'ghost', 'Tomar el control'); b.onclick = () => mode('human'); acts.append(b); }
+  if (c.open){ const b = el('button', 'ghost', 'Cerrar'); b.onclick = () => mode('cerrar'); acts.append(b); }
+  head.append(who, acts);
+
+  const msgs = el('div', 'msgs');
+  for (const m of data.mensajes){
+    const d = el('div', 'm ' + m.role, m.content);
+    d.append(el('small', '', ({patient: 'Paciente', bot: 'Asistente', staff: 'Recepción'}[m.role] || m.role) + ' · ' + fmt(m.created_at)));
+    msgs.append(d);
+  }
+
+  const form = el('form', 'compose');
+  const ta = el('textarea'); ta.placeholder = 'Escribe al paciente… (el asistente dejará de responder)'; ta.value = draft;
+  const send = el('button', 'primary', 'Enviar'); send.type = 'submit';
+  form.append(ta, send);
+  form.onsubmit = async e => {
+    e.preventDefault();
+    if (!ta.value.trim()) return;
+    send.disabled = true;
+    try { await api(`/api/panel/conversaciones/${id}/responder`, {method: 'POST', body: JSON.stringify({texto: ta.value})}); ta.value = ''; await renderConv(id, true); load(); }
+    catch (err) { alert(err.message); }
+    finally { send.disabled = false; }
+  };
+
+  box.replaceChildren(head, msgs, form);
+  if (keepBottom) msgs.scrollTop = msgs.scrollHeight;
+}
+
+load();
+setInterval(() => { if (token && !$('app').hidden && document.activeElement?.tagName !== 'TEXTAREA') load(); }, 15000);
+</script>
+</body>
+</html>

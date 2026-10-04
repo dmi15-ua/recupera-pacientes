@@ -1,0 +1,9 @@
+.env
+.env.*
+clinicas.json
+data/
+.git/
+tests/
+__pycache__/
+.venv/
+venv/

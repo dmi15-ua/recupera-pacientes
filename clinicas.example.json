@@ -1,0 +1,39 @@
+[
+  {
+    "id": "demo-dental",
+    "nombre": "Clínica Dental Demo",
+    "asistente": "Laura",
+    "activa": true,
+    "zona_horaria": "Europe/Madrid",
+
+    "wa_phone_number_id": "000000000000000",
+    "numeros_llamada": ["+34910000000"],
+    "telefono_recepcion": "+34910000001",
+    "segundos_espera": 20,
+
+    "horario": {
+      "lun": ["09:00-14:00", "16:00-20:00"],
+      "mar": ["09:00-14:00", "16:00-20:00"],
+      "mie": ["09:00-14:00", "16:00-20:00"],
+      "jue": ["09:00-14:00", "16:00-20:00"],
+      "vie": ["09:00-15:00"],
+      "sab": [],
+      "dom": []
+    },
+    "envio_permitido": "09:00-21:00",
+
+    "plantilla": {
+      "nombre": "llamada_perdida",
+      "idioma": "es",
+      "con_nombre_clinica": true,
+      "texto": "Hola, somos {clinica}. Hemos visto tu llamada y no hemos podido atenderte. ¿En qué te podemos ayudar? Responde a este mensaje y te atendemos por aquí. Si no quieres recibir mensajes, responde BAJA."
+    },
+
+    "informacion": "Dirección: Calle Mayor 1, Madrid (ejemplo).\nServicios y precios:\n- Primera visita y revisión: gratis.\n- Limpieza dental: 45 €.\n- Empaste: desde 50 €.\n- Blanqueamiento: 220 €.\nFormas de pago: efectivo y tarjeta.",
+    "instrucciones": "Trato de tú, cercano. Si preguntan por ortodoncia o implantes, ofrece la primera visita gratuita para valorarlo.",
+
+    "telegram_chat_id": "",
+    "panel_token": "cambia-esto-por-un-token-largo-y-aleatorio",
+    "bloqueados": []
+  }
+]
