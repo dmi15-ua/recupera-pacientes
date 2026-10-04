@@ -12,6 +12,7 @@ import base64
 import hashlib
 import hmac
 import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -60,10 +61,15 @@ class WhatsAppClient:
 
     async def _post(self, phone_number_id: str, payload: Dict[str, Any]) -> SendResult:
         if self.dry_run:
+            # En un servidor el simulador puede correr días: no dejar crecer la lista.
+            if len(self.outbox) > 1000:
+                del self.outbox[:500]
             self.outbox.append({"phone_number_id": phone_number_id, **payload})
             body = payload.get("text", {}).get("body") or f"[plantilla {payload.get('template', {}).get('name')}]"
-            log.info("[WhatsApp simulado] a %s: %s", payload["to"], body)
-            return SendResult(ok=True, wa_id=f"sim-{len(self.outbox)}")
+            log.info("[WhatsApp simulado] a %s", payload["to"][:4] + "****")
+            # Id único de verdad: uno basado en un contador se repetía tras cada
+            # reinicio, chocaba con los ya guardados y la respuesta no se guardaba.
+            return SendResult(ok=True, wa_id=f"sim-{uuid.uuid4().hex}")
         try:
             async with httpx.AsyncClient(timeout=20) as client:
                 r = await client.post(

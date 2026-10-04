@@ -200,3 +200,18 @@ def test_daily_llm_limit(db, make_agent, monkeypatch):
 def test_unknown_whatsapp_number_ignored(db, make_agent):
     agent, _ = make_agent()
     assert run(service.handle_inbound(db, agent, msg("hola", pnid="NOPE"))).startswith("ignorado")
+
+
+def test_bot_replies_survive_restart(db, make_agent):
+    """Tras reiniciar el servidor (outbox vacío), las respuestas se siguen guardando."""
+    agent, llm = make_agent(text("primera"), text("segunda"))
+    run(service.handle_inbound(db, agent, msg("hola", "w1")))
+    run(service.tick(db, agent, t=now() + 60))
+    whatsapp.outbox.clear()  # como tras un reinicio
+    run(service.handle_inbound(db, agent, msg("otra pregunta", "w2")))
+    run(service.tick(db, agent, t=now() + 120))
+    conv = db.open_conversation("c1", "+34600111222")
+    roles = [m["role"] for m in db.history(conv["id"], 10)]
+    assert roles == ["patient", "bot", "patient", "bot"]
+    # Y el modelo ve su propia respuesta anterior.
+    assert llm.calls[1]["contents"][1] == {"role": "model", "parts": [{"text": "primera"}]}
