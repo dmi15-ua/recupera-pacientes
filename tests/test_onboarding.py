@@ -57,6 +57,9 @@ def test_application_to_clinic(client):
     assert "- Ortodoncia invisible: desde 2.400 € (estudio gratis)" in preview["informacion"]
     assert "Seguros y mutuas: Adeslas y Sanitas" in preview["informacion"]
     assert "descuentos" in preview["instrucciones"]
+    # Lo que no se rellenó se marca como desconocido (aquí: financiación sí, accesibilidad no).
+    assert "Datos que NO tienes" in preview["informacion"] and "accesibilidad" in preview["informacion"]
+    assert "aparcamiento" not in preview["informacion"].split("Datos que NO tienes")[1]
 
     r = client.post(f"/api/admin/altas/{app_id}/convertir", headers=ADMIN).json()
     assert r["clinica_id"] == "clinica-dental-sol"

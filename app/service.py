@@ -57,7 +57,8 @@ def template_text(clinic: Dict[str, Any]) -> str:
     return tpl.get("texto", DEFAULT_TEMPLATE_TEXT).replace("{clinica}", clinic["nombre"])
 
 
-async def process_missed_call(db: Database, call: Dict[str, Any], t: int, allow_inactive: bool = False) -> str:
+async def process_missed_call(db: Database, call: Dict[str, Any], t: int, simulate: bool = False) -> str:
+    """`simulate` (simulador de /admin): admite clínicas inactivas e ignora la franja horaria."""
     clinic = db.get_clinic(call["clinic_id"])
     phone = call["phone"]
 
@@ -65,7 +66,7 @@ async def process_missed_call(db: Database, call: Dict[str, Any], t: int, allow_
         db.set_missed_status(call["id"], "omitido", reason)
         return f"omitido: {reason}"
 
-    if not clinic or (not clinic.get("activa", True) and not allow_inactive):
+    if not clinic or (not clinic.get("activa", True) and not simulate):
         return skip("clínica inactiva")
     if db.is_opted_out(clinic["id"], phone):
         return skip("el paciente pidió la baja")
@@ -74,7 +75,7 @@ async def process_missed_call(db: Database, call: Dict[str, Any], t: int, allow_
 
     # Puede que la franja de envío se haya cerrado mientras esperaba.
     allowed = hours.next_send_time(clinic, t)
-    if allowed > t:
+    if allowed > t and not simulate:
         db.set_missed_status(call["id"], "pendiente", send_after=allowed)
         return "aplazado"
 

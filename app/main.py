@@ -485,7 +485,7 @@ async def dev_call(body: DevIn, request: Request, authorization: str = Header(""
     if r != "registrada":
         return {"resultado": r, "mensajes": [], "estado": _dev_state(db, clinic, phone)}
     call = db._one("SELECT * FROM {T}missed_calls WHERE clinic_id = ? AND call_ref = ?", (clinic["id"], ref))
-    r = await service.process_missed_call(db, call, now(), allow_inactive=True)
+    r = await service.process_missed_call(db, call, now(), simulate=True)
     msgs = [service.template_text(clinic)] if r == "enviado" else []
     return {"resultado": r, "mensajes": msgs, "estado": _dev_state(db, clinic, phone)}
 

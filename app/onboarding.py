@@ -126,6 +126,12 @@ def build_informacion(app: Dict[str, Any]) -> str:
         for key, label in FAQ_LABELS.items():
             if faq.get(key):
                 lines.append(f"- {label}: {faq[key]}")
+    # Lo que la clínica dejó en blanco se dice explícitamente: si no, el modelo
+    # tiende a rellenar el hueco ("no tenemos parking").
+    unknown = [label.lower() for key, label in FAQ_LABELS.items() if key != "otros" and not faq.get(key)]
+    if unknown:
+        lines.append("\nDatos que NO tienes (no los afirmes ni los niegues; ofrece consultarlo con el equipo): "
+                     + ", ".join(unknown) + ".")
     return "\n".join(lines).strip()
 
 
