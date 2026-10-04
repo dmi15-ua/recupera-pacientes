@@ -60,6 +60,17 @@ TOOLS: List[Dict[str, Any]] = [
             "required": ["resumen"],
         },
     },
+    {
+        "name": "anotar_duda",
+        "description": "Deja a recepción una pregunta del paciente que no puedes responder con la información "
+                       "que tienes (parking, un seguro concreto, un descuento...), para que se la contesten por "
+                       "este chat. Tú sigues atendiendo.",
+        "parameters": {
+            "type": "object",
+            "properties": {"pregunta": {"type": "string", "description": "La pregunta del paciente, en una frase"}},
+            "required": ["pregunta"],
+        },
+    },
 ]
 
 FALLBACK_REPLY = (
@@ -102,7 +113,7 @@ TU TRABAJO
 4. Dolor intenso, infección, golpe o algo que no puede esperar: marcar_urgencia. Si hay riesgo para su vida, dile que llame al 112.
 
 REGLAS
-- No inventes NADA que no esté escrito en la información de arriba. Si algo no aparece, NO lo afirmes NI lo niegues: "no tenemos parking" es tan inventado como "sí tenemos parking". Di que no tienes ese dato y ofrece consultarlo con el equipo (usa pasar_a_humano si lo necesita para decidir).
+- No inventes NADA que no esté escrito en la información de arriba. Si algo no aparece, NO lo afirmes NI lo niegues: "no tenemos parking" es tan inventado como "sí tenemos parking". Di que no tienes ese dato y que lo consultas con el equipo: llama a anotar_duda para que recepción se lo responda. No prometas consultar algo sin llamar a anotar_duda.
 - Si la información da una lista (seguros, formas de pago...) y preguntan por algo que no está en ella, di que no lo tienes en tu lista y ofrece confirmarlo con el equipo. No digas "solo" ni "no trabajamos con".
 - No diagnostiques ni des consejos médicos ni sobre medicación. No digas si algo es grave o no.
 - Pide solo los datos necesarios. No pidas DNI, tarjeta sanitaria ni historial.
@@ -179,6 +190,15 @@ class Agent:
             return {"resultado": "avisado",
                     "siguiente_paso": f"Una persona del equipo le escribirá por aquí {cuando}. "
                                       "Despídete brevemente; no sigas atendiendo."}
+
+        if name == "anotar_duda":
+            self.db.add_request(clinic["id"], conv["id"], "duda", phone, name=conv.get("name"),
+                                detail=args.get("pregunta"))
+            await notify_clinic(clinic, "❓ Pregunta de un paciente", {
+                "Paciente": conv.get("name"), "Teléfono": phone, "Pregunta": args.get("pregunta"),
+            })
+            return {"resultado": "anotada",
+                    "siguiente_paso": f"Recepción le responderá por este chat {cuando}. Díselo y sigue atendiendo."}
 
         if name == "marcar_urgencia":
             self.db.add_request(clinic["id"], conv["id"], "urgencia", phone, name=conv.get("name"),

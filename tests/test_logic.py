@@ -215,3 +215,14 @@ def test_bot_replies_survive_restart(db, make_agent):
     assert roles == ["patient", "bot", "patient", "bot"]
     # Y el modelo ve su propia respuesta anterior.
     assert llm.calls[1]["contents"][1] == {"role": "model", "parts": [{"text": "primera"}]}
+
+
+def test_unknown_question_reaches_reception(db, make_agent):
+    agent, _ = make_agent(call("anotar_duda", pregunta="¿Tenéis parking?"),
+                          text("No tengo ese dato, se lo pregunto al equipo y te contestan por aquí."))
+    run(service.handle_inbound(db, agent, msg("¿Tenéis parking?")))
+    run(service.tick(db, agent, t=now() + 60))
+    req = db.list_requests("c1")[0]
+    assert (req["kind"], req["detail"]) == ("duda", "¿Tenéis parking?")
+    assert "Pregunta de un paciente" in notify.sent[-1]["text"]
+    assert db.open_conversation("c1", "+34600111222")["mode"] == "bot"  # sigue atendiendo
