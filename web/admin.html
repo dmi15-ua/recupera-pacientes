@@ -95,6 +95,7 @@ pre{white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:14px;ma
       <button data-t="altas">Fichas de alta</button>
       <button data-t="leads">Leads</button>
       <button data-t="probar">Probar el agente</button>
+      <button data-t="whatsapp">WhatsApp</button>
     </div>
     <button class="ghost" id="logout">Salir</button>
   </header>
@@ -139,7 +140,7 @@ function render(){
     if (n) b.append(el('span', 'count', n));
   });
   const v = $('view'); v.replaceChildren();
-  ({clinicas: renderClinics, altas: renderApps, leads: renderLeads, probar: renderSim})[tab](v);
+  ({clinicas: renderClinics, altas: renderApps, leads: renderLeads, probar: renderSim, whatsapp: renderWa})[tab](v);
 }
 
 function renderClinics(v){
@@ -162,7 +163,8 @@ function renderClinics(v){
       el('p', 'muted', 'Dáselo a recepción para entrar en /panel. No lo compartas fuera de la clínica.'),
       el('div', 'mono', c.panel_token || '(sin código: añádelo en Supabase)')]);
     const edit = el('button', 'ghost', 'Editar'); edit.onclick = () => editClinic(c.id);
-    row.append(toggle, edit, tok); card.append(row);
+    const demo = el('button', 'ghost', '📲 Demo real'); demo.onclick = () => demoCall(c);
+    row.append(toggle, edit, demo, tok); card.append(row);
     grid.append(card);
   }
   v.append(grid);
@@ -300,6 +302,57 @@ function renderSim(v){
   paint(); showState(null);
 }
 
+// ------------------------------------------------------------- WhatsApp
+async function renderWa(v){
+  v.append(el('p', 'hint', 'Comprueba la conexión con WhatsApp (Meta). Se consulta a Meta en cada clínica con número configurado.'));
+  const box = el('div', 'cards'); v.append(box);
+  let d;
+  try { d = await api('/api/admin/whatsapp'); } catch (e) { return v.append(el('div', 'warn', e.message)); }
+  const ok = (good, label, hint) => { const r = el('div', good ? '' : 'warn'); r.textContent = (good ? '✅ ' : '❌ ') + label + (good || !hint ? '' : ' — ' + hint); return r; };
+  const g = el('div', 'card'); g.append(el('h3', '', 'Configuración general (Railway)'),
+    ok(d.wa_token, 'WA_TOKEN', 'pon el token de acceso de Meta en las variables de Railway'),
+    ok(d.app_secret, 'WA_APP_SECRET', 'sin él se rechazan los mensajes que llegan (Meta → App settings → Basic → App secret)'),
+    ok(!!d.verify_token, 'WA_VERIFY_TOKEN'),
+    ok(d.public_base_url_ok, 'PUBLIC_BASE_URL con https'));
+  const w = el('div', 'card'); w.append(el('h3', '', 'Datos para el webhook en Meta'),
+    el('div', 'muted', 'Callback URL'), el('div', 'mono', d.webhook_url),
+    el('div', 'muted', 'Verify token'), el('div', 'mono', d.verify_token || '(falta WA_VERIFY_TOKEN)'),
+    el('div', 'muted', 'Campos a suscribir: messages (y smb_message_echoes si usas coexistencia)'));
+  box.append(g, w);
+  for (const c of d.clinicas){
+    const k = el('div', 'card'); k.append(el('h3', '', c.nombre));
+    if (!c.phone_number_id) k.append(ok(false, 'Sin Phone number ID', 'ponlo en Clínicas → Editar'));
+    else if (c.meta && c.meta.ok) k.append(ok(true, `Meta responde: ${c.meta.numero} · ${c.meta.nombre || ''}`), el('div', 'muted', 'Calidad: ' + (c.meta.calidad || '—') + (c.token_propio ? ' · token propio' : ' · token general')));
+    else k.append(ok(false, 'Meta no acepta el número o el token', c.meta ? c.meta.error : ''));
+    k.append(ok(c.activa, c.activa ? 'Activa' : 'Inactiva', 'actívala en Clínicas para que el agente conteste'));
+    box.append(k);
+  }
+}
+
+// ------------------------------------------------------------- demo real
+function demoCall(c){
+  const f = el('form', 'ef');
+  const l = el('label', 'full', 'Móvil que recibirá el WhatsApp');
+  l.append(el('small', '', 'Con el número de prueba de Meta, solo los móviles que hayas añadido como destinatarios.'));
+  const i = el('input'); i.type = 'tel'; i.placeholder = '600 000 000'; i.required = true;
+  try { i.value = localStorage.getItem('rp_demo_tel') || ''; } catch (e) {}
+  l.append(i);
+  const msg = el('div', 'full'); msg.style.fontSize = '14px';
+  const send = el('button', 'primary', 'Simular llamada perdida y enviar WhatsApp'); send.type = 'submit';
+  f.append(l, el('div', 'full muted', 'Es una llamada perdida falsa, pero el WhatsApp es REAL: sale ahora mismo desde el número de la clínica. Contesta desde el móvil y te responderá el agente.'), send, msg);
+  f.onsubmit = async e => {
+    e.preventDefault(); send.disabled = true; msg.style.color = ''; msg.textContent = 'Enviando…';
+    try { localStorage.setItem('rp_demo_tel', i.value); } catch (e) {}
+    try {
+      const r = await api(`/api/admin/clinicas/${c.id}/demo-llamada`, {method: 'POST', body: JSON.stringify({telefono: i.value})});
+      if (r.resultado === 'enviado'){ msg.style.color = 'var(--green)'; msg.textContent = '✓ Enviado. Mira el móvil.' + (r.aviso ? ' ⚠️ ' + r.aviso : ''); }
+      else { msg.style.color = 'var(--coral)'; msg.textContent = 'No se envió: ' + r.resultado + (r.detalle ? ' (' + r.detalle + ')' : ''); }
+    } catch (err) { msg.style.color = 'var(--coral)'; msg.textContent = err.message; }
+    finally { send.disabled = false; }
+  };
+  openDialog('Demo real · ' + c.nombre, [f]);
+}
+
 // ------------------------------------------------------------- editar
 const DAYN = [['lun','Lunes'],['mar','Martes'],['mie','Miércoles'],['jue','Jueves'],['vie','Viernes'],['sab','Sábado'],['dom','Domingo']];
 async function editClinic(id){
@@ -326,6 +379,10 @@ async function editClinic(id){
   if (c.wa_token_guardado){ del.append(cb, ' Quitar el token propio y usar el general'); f.append(del); }
   field('Plantilla de la llamada perdida', 'plantilla_nombre', c.plantilla_nombre);
   field('Idioma de la plantilla', 'plantilla_idioma', c.plantilla_idioma);
+  const pc = el('label', 'full'); const pcb = el('input'); pcb.type = 'checkbox'; pcb.name = 'plantilla_con_nombre';
+  pcb.checked = c.plantilla_con_nombre !== false; pcb.style.width = 'auto';
+  pc.append(pcb, ' La plantilla lleva el nombre de la clínica como {{1}} (desmárcalo para "hello_world", la de prueba de Meta, que va en en_US)');
+  f.append(pc);
 
   f.append(el('h3', '', 'Teléfonos'));
   field('Números a los que llaman los pacientes', 'numeros_llamada', (c.numeros_llamada || []).join(', '), {full: true, help: 'Separados por comas. Así se sabe de qué clínica es cada llamada perdida.'});
@@ -372,6 +429,7 @@ async function editClinic(id){
       numeros_llamada: list(g('numeros_llamada')), telefono_recepcion: g('telefono_recepcion') || null,
       segundos_espera: +g('segundos_espera') || 20, horario, envio_permitido: g('envio_permitido'),
       plantilla_nombre: g('plantilla_nombre'), plantilla_idioma: g('plantilla_idioma'),
+      plantilla_con_nombre: f.elements.plantilla_con_nombre.checked,
       informacion: g('informacion'), instrucciones: g('instrucciones'), mensaje_voz: g('mensaje_voz') || null,
       telegram_chat_id: g('telegram_chat_id') || null, bloqueados: list(g('bloqueados')),
     };

@@ -58,7 +58,8 @@ def template_text(clinic: Dict[str, Any]) -> str:
 
 
 async def process_missed_call(db: Database, call: Dict[str, Any], t: int, simulate: bool = False) -> str:
-    """`simulate` (simulador de /admin): admite clínicas inactivas e ignora la franja horaria."""
+    """`simulate` (simulador y demo de /admin): admite clínicas inactivas e ignora la
+    franja horaria. Si el envío es real o simulado lo decide whatsapp.SIMULATING."""
     clinic = db.get_clinic(call["clinic_id"])
     phone = call["phone"]
 

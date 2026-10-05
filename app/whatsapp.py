@@ -124,6 +124,26 @@ class WhatsAppClient:
             "template": template,
         }, token)
 
+    async def check_number(self, phone_number_id: str, token: Optional[str] = None) -> Dict[str, Any]:
+        """Pregunta a Meta por el número: confirma que el id y el token sirven."""
+        token = token or settings.wa_token
+        if not token:
+            return {"ok": False, "error": "sin token"}
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(
+                    self._url(phone_number_id),
+                    params={"fields": "display_phone_number,verified_name,quality_rating"},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            data = r.json() if r.content else {}
+            if r.status_code == 200:
+                return {"ok": True, "numero": data.get("display_phone_number"),
+                        "nombre": data.get("verified_name"), "calidad": data.get("quality_rating")}
+            return {"ok": False, "error": data.get("error", {}).get("message", f"HTTP {r.status_code}")}
+        except httpx.HTTPError as e:
+            return {"ok": False, "error": str(e)}
+
     async def download_media(self, media_id: str, token: Optional[str] = None) -> Optional[bytes]:
         token = self._token(token)
         if not token:

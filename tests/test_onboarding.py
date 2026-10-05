@@ -196,3 +196,36 @@ def test_per_clinic_token_and_simulator_never_sends(client, monkeypatch):
     body = {"clinica_id": cid, "telefono": "600123999"}
     assert client.post("/api/dev/llamada", json=body, headers=ADMIN).json()["resultado"] == "enviado"
     assert len(sent) == n
+
+
+def test_demo_call_sends_real_template(client, monkeypatch):
+    import httpx
+    from app.config import settings
+    sent = []
+
+    class FakeResp:
+        status_code = 200
+        content = b"1"
+
+        def json(self):
+            return {"messages": [{"id": f"wamid.{len(sent)}"}]}
+
+    async def fake_post(self, url, headers=None, json=None):
+        sent.append(json)
+        return FakeResp()
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    cid = _new_clinic(client)
+    body = {"telefono": "600 555 444"}
+    r = client.post(f"/api/admin/clinicas/{cid}/demo-llamada", json=body, headers=ADMIN)
+    assert r.status_code == 400 and "Phone number ID" in r.json()["detail"]
+
+    clinic = app.state.db.get_clinic(cid)
+    app.state.db.upsert_clinic({**clinic, "wa_phone_number_id": "555",
+                                "plantilla": {"nombre": "hello_world", "idioma": "en_US", "con_nombre_clinica": False}})
+    monkeypatch.setattr(settings, "wa_token", "TOKEN-GENERAL")
+    for _ in range(2):  # se puede repetir la demo con el mismo móvil
+        r = client.post(f"/api/admin/clinicas/{cid}/demo-llamada", json=body, headers=ADMIN).json()
+        assert r["resultado"] == "enviado" and "inactiva" in r["aviso"]
+    tpl = sent[-1]["template"]
+    assert sent[-1]["to"] == "34600555444" and tpl["name"] == "hello_world" and "components" not in tpl

@@ -380,6 +380,9 @@ class ClinicEditIn(BaseModel):
     envio_permitido: str = "09:00-21:00"
     plantilla_nombre: str = Field("llamada_perdida", pattern=r"^[a-z0-9_]{1,512}$")
     plantilla_idioma: str = Field("es", pattern=r"^[a-z]{2}(_[A-Z]{2})?$")
+    # La plantilla lleva {{1}} = nombre de la clínica. hello_world (la de prueba
+    # de Meta) no lleva variables: entonces, False.
+    plantilla_con_nombre: bool = True
     informacion: str = Field("", max_length=8000)
     instrucciones: str = Field("", max_length=4000)
     mensaje_voz: Optional[str] = Field(None, max_length=500)
@@ -393,6 +396,7 @@ def _clinic_for_edit(c: Dict) -> Dict:
         "id": c["id"], "activa": c["activa"],
         "plantilla_nombre": c.get("plantilla", {}).get("nombre", "llamada_perdida"),
         "plantilla_idioma": c.get("plantilla", {}).get("idioma", "es"),
+        "plantilla_con_nombre": c.get("plantilla", {}).get("con_nombre_clinica", True),
         # El token nunca vuelve al navegador: solo si hay uno y cómo acaba.
         "wa_token_guardado": ("…" + c["wa_token"][-4:]) if c.get("wa_token") else None,
     })
@@ -447,7 +451,8 @@ def admin_clinic_update(clinic_id: str, body: ClinicEditIn, request: Request, au
         "segundos_espera": body.segundos_espera,
         "horario": horario,
         "envio_permitido": envio,
-        "plantilla": {**c.get("plantilla", {}), "nombre": body.plantilla_nombre, "idioma": body.plantilla_idioma},
+        "plantilla": {**c.get("plantilla", {}), "nombre": body.plantilla_nombre, "idioma": body.plantilla_idioma,
+                      "con_nombre_clinica": body.plantilla_con_nombre},
         "informacion": body.informacion.strip(),
         "instrucciones": body.instrucciones.strip(),
         "mensaje_voz": body.mensaje_voz,
@@ -466,6 +471,67 @@ def admin_clinic_update(clinic_id: str, body: ClinicEditIn, request: Request, au
         updated.setdefault(key, None)
     db.upsert_clinic(updated)
     return _clinic_for_edit(db.get_clinic(clinic_id))
+
+
+@app.get("/api/admin/whatsapp")
+async def admin_whatsapp_status(request: Request, authorization: str = Header("")):
+    """Qué falta para que WhatsApp funcione, y prueba real contra Meta por clínica."""
+    _admin(authorization)
+    clinics = []
+    for c in _db(request).list_clinics():
+        info = {"id": c["id"], "nombre": c["nombre"], "activa": c["activa"],
+                "phone_number_id": c.get("wa_phone_number_id"), "token_propio": bool(c.get("wa_token"))}
+        if c.get("wa_phone_number_id"):
+            info["meta"] = await whatsapp.check_number(c["wa_phone_number_id"], c.get("wa_token"))
+        clinics.append(info)
+    return {
+        "webhook_url": settings.public_base_url + "/webhooks/whatsapp",
+        "verify_token": settings.wa_verify_token or None,
+        "wa_token": bool(settings.wa_token),
+        "app_secret": bool(settings.wa_app_secret),
+        "public_base_url_ok": settings.public_base_url.startswith("https://"),
+        "clinicas": clinics,
+    }
+
+
+class DemoIn(BaseModel):
+    telefono: str = Field(..., min_length=6, max_length=30)
+
+
+@app.post("/api/admin/clinicas/{clinic_id}/demo-llamada")
+async def admin_demo_call(clinic_id: str, body: DemoIn, request: Request, authorization: str = Header("")):
+    """Demo de ventas: llamada perdida falsa que envía un WhatsApp REAL a ese móvil
+    al momento (sin esperar ni mirar la franja horaria). Cuando contestes desde
+    el móvil, responde el agente de verdad (la clínica tiene que estar activa)."""
+    _admin(authorization)
+    if not _rate_ok("demo:" + _client_ip(request), limit=10, window=3600):
+        raise HTTPException(429, "Demasiadas demos seguidas. Espera un poco.")
+    db = _db(request)
+    clinic = db.get_clinic(clinic_id)
+    if not clinic:
+        raise HTTPException(404)
+    if not clinic.get("wa_phone_number_id"):
+        raise HTTPException(400, "Falta el Phone number ID de WhatsApp de la clínica (Editar).")
+    if not (clinic.get("wa_token") or settings.wa_token):
+        raise HTTPException(400, "No hay token de WhatsApp: pon WA_TOKEN en Railway o uno propio en la clínica.")
+    phone = normalize(body.telefono)
+    # Empieza de cero con ese móvil: si no, las reglas (conversación reciente,
+    # baja) impedirían repetir la demo.
+    db._exec("UPDATE {T}conversations SET open = 0, reply_due_at = NULL WHERE clinic_id = ? AND phone = ?",
+             (clinic_id, phone))
+    db._exec("DELETE FROM {T}optouts WHERE clinic_id = ? AND phone = ?", (clinic_id, phone))
+    db._exec("UPDATE {T}missed_calls SET status = 'omitido', reason = 'demo' "
+             "WHERE clinic_id = ? AND phone = ? AND status IN ('pendiente', 'enviado')", (clinic_id, phone))
+    ref = f"demo-{time.time()}"
+    r = service.register_missed_call(db, clinic, phone, ref)
+    if r != "registrada":
+        raise HTTPException(400, f"No se puede usar ese número: {r}")
+    call = db._one("SELECT * FROM {T}missed_calls WHERE clinic_id = ? AND call_ref = ?", (clinic_id, ref))
+    result = await service.process_missed_call(db, call, now(), simulate=True)
+    row = db._one("SELECT status, reason FROM {T}missed_calls WHERE id = ?", (call["id"],))
+    return {"resultado": result, "detalle": row["reason"] or "",
+            "aviso": None if clinic.get("activa") else
+            "La clínica está inactiva: el WhatsApp sale, pero si contestas el agente no responderá. Actívala."}
 
 
 @app.post("/api/admin/clinicas/{clinic_id}/nuevo-codigo")
