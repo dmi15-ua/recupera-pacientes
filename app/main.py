@@ -138,8 +138,17 @@ def _log_webhook(entry: Dict) -> None:
 async def wa_webhook(request: Request, background: BackgroundTasks):
     raw = await request.body()
     if not verify_signature(raw, request.headers.get("X-Hub-Signature-256")):
+        import hashlib, hmac as _hmac
+        sha1 = request.headers.get("X-Hub-Signature", "")
+        sha1_ok = bool(settings.wa_app_secret and sha1.startswith("sha1=") and _hmac.compare_digest(
+            _hmac.new(settings.wa_app_secret.encode(), raw, hashlib.sha1).hexdigest(), sha1[5:]))
+        try:
+            entry_id = (json.loads(raw).get("entry") or [{}])[0].get("id")
+        except ValueError:
+            entry_id = None
         _log_webhook({"firma_ok": False, "tiene_firma": bool(request.headers.get("X-Hub-Signature-256")),
-                      "bytes": len(raw)})
+                      "sha1_ok": sha1_ok, "bytes": len(raw), "agente": request.headers.get("user-agent", "")[:60],
+                      "cuenta": entry_id, "content_encoding": request.headers.get("content-encoding")})
         log.warning("Webhook de WhatsApp rechazado: la firma no cuadra con WA_APP_SECRET")
         raise HTTPException(401, "firma no válida")
     try:
