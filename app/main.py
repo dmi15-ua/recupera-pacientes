@@ -509,6 +509,9 @@ async def admin_whatsapp_status(request: Request, authorization: str = Header(""
         "verify_token": settings.wa_verify_token or None,
         "wa_token": bool(settings.wa_token),
         "app_secret": bool(settings.wa_app_secret),
+        # Para comparar con Meta sin mostrar la clave: longitud y últimos 4.
+        "app_secret_huella": (f"{len(settings.wa_app_secret)} caracteres, termina en "
+                              f"…{settings.wa_app_secret[-4:]}") if settings.wa_app_secret else None,
         "public_base_url_ok": settings.public_base_url.startswith("https://"),
         "clinicas": clinics,
     }

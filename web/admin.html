@@ -311,7 +311,7 @@ async function renderWa(v){
   const ok = (good, label, hint) => { const r = el('div', good ? '' : 'warn'); r.textContent = (good ? '✅ ' : '❌ ') + label + (good || !hint ? '' : ' — ' + hint); return r; };
   const g = el('div', 'card'); g.append(el('h3', '', 'Configuración general (Railway)'),
     ok(d.wa_token, 'WA_TOKEN', 'pon el token de acceso de Meta en las variables de Railway'),
-    ok(d.app_secret, 'WA_APP_SECRET', 'sin él se rechazan los mensajes que llegan (Meta → App settings → Basic → App secret)'),
+    ok(d.app_secret, 'WA_APP_SECRET' + (d.app_secret_huella ? ' (' + d.app_secret_huella + ')' : ''), 'sin él se rechazan los mensajes que llegan (Meta → Información básica → Clave secreta)'),
     ok(!!d.verify_token, 'WA_VERIFY_TOKEN'),
     ok(d.public_base_url_ok, 'PUBLIC_BASE_URL con https'));
   const w = el('div', 'card'); w.append(el('h3', '', 'Datos para el webhook en Meta'),
