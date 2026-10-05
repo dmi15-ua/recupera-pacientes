@@ -318,7 +318,28 @@ async function renderWa(v){
     el('div', 'muted', 'Callback URL'), el('div', 'mono', d.webhook_url),
     el('div', 'muted', 'Verify token'), el('div', 'mono', d.verify_token || '(falta WA_VERIFY_TOKEN)'),
     el('div', 'muted', 'Campos a suscribir: messages (y smb_message_echoes si usas coexistencia)'));
-  box.append(g, w);
+  const hk = el('div', 'card'); hk.append(el('h3', '', 'Últimas llamadas de Meta al webhook'));
+  if (!d.ultimos_webhooks.length) hk.append(el('div', 'warn', 'Ninguna desde el último despliegue. Si escribes al número y aquí no aparece nada, Meta no está enviando: revisa la suscripción de abajo.'));
+  for (const h of d.ultimos_webhooks.slice(0, 8)){
+    const t = new Date(h.hora * 1000).toLocaleTimeString('es-ES');
+    hk.append(ok(h.firma_ok, `${t} · ${h.firma_ok ? (h.eventos || []).join(', ') || 'sin eventos' : 'firma no válida'}`,
+      h.firma_ok ? '' : 'WA_APP_SECRET no coincide con la clave secreta de la app en Meta'));
+  }
+  const sub = el('div', 'card'); sub.append(el('h3', '', 'Suscripción de la cuenta de WhatsApp'));
+  const wi = el('input'); wi.placeholder = 'ID de la cuenta de WhatsApp Business'; try { wi.value = localStorage.getItem('rp_waba') || ''; } catch (e) {}
+  const out = el('div', 'muted');
+  const run = async suscribir => {
+    try { localStorage.setItem('rp_waba', wi.value.trim()); } catch (e) {}
+    try {
+      const r = await api('/api/admin/whatsapp/suscripcion', {method: 'POST', body: JSON.stringify({waba_id: wi.value.trim(), suscribir})});
+      out.textContent = r.ok ? (r.apps_suscritas.length ? '✅ Apps suscritas: ' + r.apps_suscritas.join(', ') : '❌ Ninguna app suscrita: pulsa "Suscribir"') : '❌ ' + r.error;
+    } catch (e) { out.textContent = '❌ ' + e.message; }
+  };
+  const bc = el('button', 'ghost', 'Comprobar'); bc.onclick = () => run(false);
+  const bs = el('button', 'primary', 'Suscribir esta app'); bs.onclick = () => run(true);
+  const rw = el('div', 'row'); rw.append(bc, bs);
+  sub.append(el('div', 'muted', 'Sin esta suscripción, Meta no avisa a la app de los mensajes que recibe el número.'), wi, rw, out);
+  box.append(g, w, hk, sub);
   for (const c of d.clinicas){
     const k = el('div', 'card'); k.append(el('h3', '', c.nombre));
     if (!c.phone_number_id) k.append(ok(false, 'Sin Phone number ID', 'ponlo en Clínicas → Editar'));

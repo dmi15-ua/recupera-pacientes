@@ -124,12 +124,31 @@ def wa_verify(request: Request):
     raise HTTPException(403)
 
 
+# Últimas llamadas al webhook (sin contenido de mensajes): para ver desde
+# /admin si Meta está llegando y si la firma cuadra con WA_APP_SECRET.
+WEBHOOK_LOG: List[Dict] = []
+
+
+def _log_webhook(entry: Dict) -> None:
+    WEBHOOK_LOG.append({"hora": int(time.time()), **entry})
+    del WEBHOOK_LOG[:-20]
+
+
 @app.post("/webhooks/whatsapp")
 async def wa_webhook(request: Request, background: BackgroundTasks):
     raw = await request.body()
     if not verify_signature(raw, request.headers.get("X-Hub-Signature-256")):
+        _log_webhook({"firma_ok": False, "tiene_firma": bool(request.headers.get("X-Hub-Signature-256")),
+                      "bytes": len(raw)})
+        log.warning("Webhook de WhatsApp rechazado: la firma no cuadra con WA_APP_SECRET")
         raise HTTPException(401, "firma no válida")
-    events = parse_webhook(json.loads(raw or b"{}"))
+    try:
+        events = parse_webhook(json.loads(raw or b"{}"))
+    except ValueError:
+        _log_webhook({"firma_ok": True, "error": "JSON no válido"})
+        raise HTTPException(400)
+    _log_webhook({"firma_ok": True, "eventos": [f"{e.kind}:{e.status or e.media_type or ''}" for e in events],
+                  "phone_number_ids": sorted({e.phone_number_id for e in events})})
     # Se responde 200 ya; Meta reintenta si tardamos y eso duplicaría mensajes.
     for ev in events:
         background.add_task(service.handle_inbound, _db(request), request.app.state.agent, ev)
@@ -485,6 +504,7 @@ async def admin_whatsapp_status(request: Request, authorization: str = Header(""
             info["meta"] = await whatsapp.check_number(c["wa_phone_number_id"], c.get("wa_token"))
         clinics.append(info)
     return {
+        "ultimos_webhooks": list(reversed(WEBHOOK_LOG)),
         "webhook_url": settings.public_base_url + "/webhooks/whatsapp",
         "verify_token": settings.wa_verify_token or None,
         "wa_token": bool(settings.wa_token),
@@ -492,6 +512,34 @@ async def admin_whatsapp_status(request: Request, authorization: str = Header(""
         "public_base_url_ok": settings.public_base_url.startswith("https://"),
         "clinicas": clinics,
     }
+
+
+class WabaIn(BaseModel):
+    waba_id: str = Field(..., pattern=r"^\d{5,30}$")
+    suscribir: bool = False
+
+
+@app.post("/api/admin/whatsapp/suscripcion")
+async def admin_waba_subscription(body: WabaIn, authorization: str = Header("")):
+    """Comprueba (y si se pide, crea) la suscripción de la cuenta de WhatsApp
+    Business a esta app. Sin ella Meta no envía al webhook los mensajes que llegan."""
+    _admin(authorization)
+    if not settings.wa_token:
+        raise HTTPException(400, "Falta WA_TOKEN")
+    import httpx
+    url = f"https://graph.facebook.com/{settings.wa_graph_version}/{body.waba_id}/subscribed_apps"
+    headers = {"Authorization": f"Bearer {settings.wa_token}"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        if body.suscribir:
+            r = await client.post(url, headers=headers)
+            if r.status_code != 200:
+                return {"ok": False, "error": r.json().get("error", {}).get("message", r.text[:200])}
+        r = await client.get(url, headers=headers)
+    if r.status_code != 200:
+        return {"ok": False, "error": r.json().get("error", {}).get("message", r.text[:200])}
+    apps = [a.get("whatsapp_business_api_data", {}).get("name") or a.get("whatsapp_business_api_data", {}).get("id")
+            for a in r.json().get("data", [])]
+    return {"ok": True, "apps_suscritas": apps}
 
 
 class DemoIn(BaseModel):
