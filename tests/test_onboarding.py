@@ -229,3 +229,35 @@ def test_demo_call_sends_real_template(client, monkeypatch):
         assert r["resultado"] == "enviado" and "inactiva" in r["aviso"]
     tpl = sent[-1]["template"]
     assert sent[-1]["to"] == "34600555444" and tpl["name"] == "hello_world" and "components" not in tpl
+
+
+def test_delete_clinic(client):
+    from app import service
+    from conftest import run, FakeLLM
+    from app.agent import Agent
+    from app.whatsapp import Inbound
+    db = app.state.db
+    app_id = client.post("/api/altas", json=FICHA).json()["id"]
+    cid = client.post(f"/api/admin/altas/{app_id}/convertir", headers=ADMIN).json()["clinica_id"]
+    clinic = db.get_clinic(cid)
+    db.upsert_clinic({**clinic, "wa_phone_number_id": "888", "activa": True})
+    ev = Inbound(kind="message", phone_number_id="888", phone="+34600000555", wa_id="d1", text="hola")
+    run(service.handle_inbound(db, Agent(db, FakeLLM()), ev))
+    service.register_missed_call(db, db.get_clinic(cid), "600000556", "x1")
+    assert db._one("SELECT COUNT(*) AS n FROM {T}messages")["n"] >= 1
+
+    bad = client.request("DELETE", f"/api/admin/clinicas/{cid}", json={"confirmar_nombre": "otra"}, headers=ADMIN)
+    assert bad.status_code == 400 and db.get_clinic(cid)
+    r = client.request("DELETE", f"/api/admin/clinicas/{cid}", json={"confirmar_nombre": clinic["nombre"]},
+                       headers=ADMIN)
+    assert r.status_code == 200 and r.json()["borrado"]["conversaciones"] == 1
+    assert db.get_clinic(cid) is None
+    for t in ("conversations", "missed_calls", "requests"):
+        assert db._one(f"SELECT COUNT(*) AS n FROM {{T}}{t} WHERE clinic_id = ?", (cid,))["n"] == 0
+    assert db._one("SELECT COUNT(*) AS n FROM {T}messages")["n"] == 0
+    ficha = db.get_application(app_id)
+    assert ficha["status"] == "revisada" and ficha["clinic_id"] is None
+    # La otra clínica no se toca y la ficha se puede volver a convertir.
+    assert db.get_clinic("c1")
+    assert client.post(f"/api/admin/altas/{app_id}/convertir", headers=ADMIN).status_code == 200
+    assert client.get("/api/admin/resumen", headers=ADMIN).json()["base_de_datos"].startswith(("SQLite", "Postgres"))

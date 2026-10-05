@@ -328,6 +328,26 @@ class Database:
                 return c
         return None
 
+    def delete_clinic(self, clinic_id: str) -> Dict[str, int]:
+        """Borra la clínica y TODO lo suyo: conversaciones, mensajes, llamadas,
+        solicitudes y bajas. La ficha de alta se conserva (vuelve a "revisada")
+        por si hay que recrearla."""
+        counts = {
+            "conversaciones": self._one("SELECT COUNT(*) AS n FROM {T}conversations WHERE clinic_id = ?",
+                                        (clinic_id,))["n"],
+            "llamadas": self._one("SELECT COUNT(*) AS n FROM {T}missed_calls WHERE clinic_id = ?",
+                                  (clinic_id,))["n"],
+        }
+        # Los mensajes caen en cascada al borrar sus conversaciones.
+        self._exec("DELETE FROM {T}messages WHERE conversation_id IN "
+                   "(SELECT id FROM {T}conversations WHERE clinic_id = ?)", (clinic_id,))
+        for table in ("conversations", "missed_calls", "requests", "optouts"):
+            self._exec(f"DELETE FROM {{T}}{table} WHERE clinic_id = ?", (clinic_id,))
+        self._exec("UPDATE {T}clinic_applications SET status = 'revisada', clinic_id = NULL WHERE clinic_id = ?",
+                   (clinic_id,))
+        self._exec("DELETE FROM {T}clinics WHERE id = ?", (clinic_id,))
+        return counts
+
     def set_clinic_active(self, clinic_id: str, active: bool) -> None:
         self._exec("UPDATE {T}clinics SET activa = ? WHERE id = ?", (active, clinic_id))
 

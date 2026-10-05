@@ -144,6 +144,7 @@ function render(){
 }
 
 function renderClinics(v){
+  v.append(el('div', 'muted', '🗄️ Base de datos: ' + data.base_de_datos));
   v.append(el('p', 'hint', 'Últimos 30 días. Con "Editar" cambias el número de WhatsApp, los teléfonos, el horario, los precios y las instrucciones de cada clínica.'));
   if (!data.clinicas.length) return v.append(el('div', 'empty', 'Aún no hay clínicas. Convierte una ficha de alta para crear la primera.'));
   const grid = el('div', 'cards');
@@ -164,7 +165,8 @@ function renderClinics(v){
       el('div', 'mono', c.panel_token || '(sin código: añádelo en Supabase)')]);
     const edit = el('button', 'ghost', 'Editar'); edit.onclick = () => editClinic(c.id);
     const demo = el('button', 'ghost', '📲 Demo real'); demo.onclick = () => demoCall(c);
-    row.append(toggle, edit, demo, tok); card.append(row);
+    const del = el('button', 'danger', 'Eliminar'); del.onclick = () => deleteClinic(c);
+    row.append(toggle, edit, demo, tok, del); card.append(row);
     grid.append(card);
   }
   v.append(grid);
@@ -300,6 +302,30 @@ function renderSim(v){
   side.append(cfg, state, ideas);
   wrap.append(phone, side); v.append(wrap);
   paint(); showState(null);
+}
+
+// ------------------------------------------------------------- eliminar
+function deleteClinic(c){
+  const s = c.stats_30d;
+  const f = el('form', 'ef');
+  const warn = el('div', 'warn full', `Se borrará la clínica y TODO lo suyo: conversaciones y mensajes con pacientes, llamadas perdidas, solicitudes y bajas. No se puede deshacer. (Últimos 30 días: ${s.conversaciones} conversaciones, ${s.llamadas_perdidas} llamadas.) La ficha de alta se conserva.`);
+  const l = el('label', 'full', 'Para confirmar, escribe el nombre exacto de la clínica:');
+  l.append(el('small', '', c.nombre));
+  const i = el('input'); i.autocomplete = 'off'; l.append(i);
+  const msg = el('div', 'err full');
+  const go = el('button', 'primary', 'Eliminar definitivamente'); go.type = 'submit'; go.style.background = 'var(--coral)';
+  f.append(warn, l, go, msg);
+  f.onsubmit = async e => {
+    e.preventDefault(); msg.textContent = '';
+    if (i.value.trim() !== c.nombre.trim()) { msg.textContent = 'El nombre no coincide.'; return; }
+    go.disabled = true;
+    try {
+      await api('/api/admin/clinicas/' + encodeURIComponent(c.id), {method: 'DELETE', body: JSON.stringify({confirmar_nombre: i.value})});
+      $('dlg').close(); load();
+    } catch (err) { msg.textContent = err.message; }
+    finally { go.disabled = false; }
+  };
+  openDialog('Eliminar ' + c.nombre, [f]);
 }
 
 // ------------------------------------------------------------- WhatsApp

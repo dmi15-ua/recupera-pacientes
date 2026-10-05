@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
     app.state.agent = Agent(app.state.db)
     seed_clinics(app.state.db, settings.clinics_file)
     log.info("Base de datos: %s. Clínicas: %s. WhatsApp %s. LLM %s.",
-             "Supabase/Postgres" if app.state.db.pg else "SQLite", len(app.state.db.list_clinics()),
+             "Postgres" if app.state.db.pg else "SQLite", len(app.state.db.list_clinics()),
              "SIMULADO" if whatsapp.dry_run else "real",
              settings.gemini_model if settings.gemini_api_key else "sin key")
     task = None
@@ -324,7 +324,10 @@ def admin_summary(request: Request, authorization: str = Header("")):
             "faltan": onboarding.missing_config(c), "stats_30d": db.clinic_stats(c["id"], since),
             "panel_token": c.get("panel_token"),
         })
-    return {"leads": db.list_leads(), "altas": db.list_applications(), "clinicas": clinics}
+    return {"leads": db.list_leads(), "altas": db.list_applications(), "clinicas": clinics,
+            # Para ver de un vistazo dónde se guardan las fichas y conversaciones.
+            "base_de_datos": f"Postgres (schema {settings.db_schema})" if db.pg
+            else "SQLite local (¡se pierde al redesplegar!)"}
 
 
 @app.get("/api/admin/altas/{app_id}/vista-previa")
@@ -373,6 +376,25 @@ def admin_lead_status(lead_id: int, body: StatusIn, request: Request, authorizat
 
 class ActiveIn(BaseModel):
     activa: bool
+
+
+class DeleteIn(BaseModel):
+    # Hay que escribir el nombre exacto de la clínica: evita borrar la que no es.
+    confirmar_nombre: str
+
+
+@app.delete("/api/admin/clinicas/{clinic_id}")
+def admin_clinic_delete(clinic_id: str, body: DeleteIn, request: Request, authorization: str = Header("")):
+    _admin(authorization)
+    db = _db(request)
+    c = db.get_clinic(clinic_id)
+    if not c:
+        raise HTTPException(404)
+    if body.confirmar_nombre.strip() != c["nombre"].strip():
+        raise HTTPException(400, "El nombre no coincide: no se ha borrado nada.")
+    borrado = db.delete_clinic(clinic_id)
+    log.info("Clínica %s eliminada desde /admin", clinic_id)
+    return {"ok": True, "borrado": borrado}
 
 
 @app.post("/api/admin/clinicas/{clinic_id}/activa")
