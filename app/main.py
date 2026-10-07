@@ -50,13 +50,13 @@ async def worker_loop(app: FastAPI) -> None:
     last_maintenance = 0.0
     while True:
         try:
-            await service.tick(app.state.db, app.state.agent)
+            await service.tick(app.state.db, app.state.agent, wait=False)
             if time.time() - last_maintenance > 3600:
                 service.maintenance(app.state.db)
                 last_maintenance = time.time()
         except Exception:
             log.exception("Error en el bucle de tareas")
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
 
 @asynccontextmanager
@@ -536,6 +536,7 @@ async def admin_whatsapp_status(request: Request, authorization: str = Header(""
         clinics.append(info)
     return {
         "ultimos_webhooks": list(reversed(WEBHOOK_LOG)),
+        "ultimas_respuestas": list(reversed(service.TIMINGS)),
         "webhook_url": settings.public_base_url + "/webhooks/whatsapp",
         "verify_token": settings.wa_verify_token or None,
         "wa_token": bool(settings.wa_token),

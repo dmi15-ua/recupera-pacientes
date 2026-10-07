@@ -4,8 +4,10 @@ Los webhooks solo registran y devuelven 200 al momento. El trabajo pesado
 (enviar la plantilla, llamar al LLM) lo hace el bucle de `worker`, que así
 puede esperar, agrupar y descartar sin bloquear a Meta ni a la centralita.
 """
+import asyncio
 import logging
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, List, Optional
 
 from app import hours, safety
 from app.agent import Agent
@@ -217,7 +219,13 @@ async def _reply_fixed(db: Database, clinic: Dict[str, Any], conv: Dict[str, Any
     db.add_message(conv["id"], "bot", text, wa_id=res.wa_id if res.ok else None)
 
 
+# Últimas respuestas con sus tiempos, para ver desde /admin dónde se va el rato.
+TIMINGS: List[Dict[str, Any]] = []
+
+
 async def process_reply(db: Database, agent: Agent, conv: Dict[str, Any]) -> str:
+    started = time.monotonic()
+    waited = max(0, now() - (conv.get("reply_due_at") or now()))
     db.update_conversation(conv["id"], reply_due_at=None)
     conv = db.get_conversation(conv["id"])
     if conv["mode"] == "human" and (conv["human_until"] or 0) > now():
@@ -226,24 +234,67 @@ async def process_reply(db: Database, agent: Agent, conv: Dict[str, Any]) -> str
     if not clinic:
         return "sin clínica"
     result = await agent.respond(clinic, conv)
+    t_send = time.monotonic()
     await _reply_fixed(db, clinic, conv, result.reply)
+    now_m = time.monotonic()
+    TIMINGS.append({
+        "hora": now(), "clinica": clinic["id"],
+        "cola_s": waited,                                # desde que tocaba responder hasta que se atendió
+        "ia_s": round(result.llm_seconds, 1), "llamadas_ia": result.llm_calls, "reintentos_ia": result.llm_retries,
+        "envio_s": round(now_m - t_send, 1), "total_s": round(now_m - started, 1),
+    })
+    del TIMINGS[:-30]
+    if now_m - started > 15:
+        log.warning("Respuesta lenta (%.1f s): IA %.1f s, envío %.1f s", now_m - started, result.llm_seconds,
+                    now_m - t_send)
     return "respondido"
 
 
 # --------------------------------------------------------------------- bucle
-async def tick(db: Database, agent: Agent, t: Optional[int] = None) -> None:
+_INFLIGHT: set = set()
+_TASKS: set = set()
+
+
+async def _guarded(key: str, coro) -> None:
+    try:
+        await coro
+    except Exception:
+        log.exception("Error procesando %s", key)
+        if key.startswith("llamada:"):
+            db_id = int(key.split(":")[1])
+            # Si falla del todo, no se reintenta en bucle: se marca como fallida.
+            _GUARD_DB[0].set_missed_status(db_id, "fallido", "error interno")
+    finally:
+        _INFLIGHT.discard(key)
+
+
+_GUARD_DB: List[Any] = [None]
+
+
+async def tick(db: Database, agent: Agent, t: Optional[int] = None, wait: bool = True) -> None:
+    """Atiende lo que toca. Cada llamada perdida y cada conversación va en su
+    propia tarea: una respuesta lenta no retrasa las de las demás clínicas.
+    wait=False (el bucle real) no espera a que acaben; wait=True (tests) sí."""
     t = t or now()
+    _GUARD_DB[0] = db
+    jobs = []
     for call in db.due_missed_calls(t):
-        try:
-            await process_missed_call(db, call, t)
-        except Exception:
-            log.exception("Error procesando la llamada perdida %s", call["id"])
-            db.set_missed_status(call["id"], "fallido", "error interno")
+        key = f"llamada:{call['id']}"
+        if key not in _INFLIGHT:
+            _INFLIGHT.add(key)
+            jobs.append(_guarded(key, process_missed_call(db, call, t)))
     for conv in db.due_conversations(t):
-        try:
-            await process_reply(db, agent, conv)
-        except Exception:
-            log.exception("Error respondiendo la conversación %s", conv["id"])
+        key = f"conv:{conv['id']}"
+        if key not in _INFLIGHT:
+            _INFLIGHT.add(key)
+            jobs.append(_guarded(key, process_reply(db, agent, conv)))
+    if wait:
+        await asyncio.gather(*jobs)
+        return
+    for job in jobs:
+        task = asyncio.create_task(job)
+        _TASKS.add(task)
+        task.add_done_callback(_TASKS.discard)
 
 
 def maintenance(db: Database, t: Optional[int] = None) -> None:

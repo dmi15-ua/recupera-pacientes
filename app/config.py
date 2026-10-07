@@ -91,7 +91,7 @@ class Settings:
             # Si ya hablamos con este número hace poco, no se manda otro saludo.
             recent_conversation_s=_int("RECENT_CONVERSATION_S", 6 * 3600),
             # Se espera a que el paciente termine de escribir antes de responder.
-            debounce_s=_int("DEBOUNCE_S", 6),
+            debounce_s=_int("DEBOUNCE_S", 3),
             # Cuando recepción escribe, el bot calla durante este tiempo.
             human_takeover_s=_int("HUMAN_TAKEOVER_S", 12 * 3600),
             idle_close_s=_int("IDLE_CLOSE_S", 3 * 24 * 3600),

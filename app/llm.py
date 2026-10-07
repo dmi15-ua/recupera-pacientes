@@ -9,6 +9,7 @@ La key va en la cabecera x-goog-api-key, nunca en la URL: httpx registra las
 URLs en el log y la clave acabaría en los logs del servidor.
 """
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -21,11 +22,19 @@ log = logging.getLogger(__name__)
 BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
+# Tiempo máximo de cada intento. Un intento que se atasca no debe tener al
+# paciente esperando casi un minuto: Gemini suele contestar en 1-5 s, así que
+# si no ha respondido en 12 s se reintenta (casi siempre contesta a la segunda).
+ATTEMPT_TIMEOUTS = (12, 12, 25)
+
+
 @dataclass
 class LLMResponse:
     ok: bool
     parts: List[Dict[str, Any]] = field(default_factory=list)
     error: str = ""
+    seconds: float = 0.0   # tiempo total gastado, con reintentos
+    attempts: int = 1
 
     @property
     def text(self) -> str:
@@ -55,36 +64,43 @@ class GeminiClient:
         if tools:
             payload["tools"] = [{"functionDeclarations": tools}]
 
-        for attempt in (1, 2):
+        t0 = time.monotonic()
+        for attempt, timeout in enumerate(ATTEMPT_TIMEOUTS, start=1):
             try:
-                async with httpx.AsyncClient(timeout=40) as client:
+                async with httpx.AsyncClient(timeout=timeout) as client:
                     r = await client.post(
                         f"{BASE}/{settings.gemini_model}:generateContent",
                         headers={"x-goog-api-key": settings.gemini_api_key},
                         json=payload,
                     )
             except httpx.HTTPError as e:
-                log.warning("Gemini: error de red (intento %s): %s", attempt, e)
+                log.warning("Gemini: %s en el intento %s (%.1f s)", type(e).__name__, attempt,
+                            time.monotonic() - t0)
                 continue
 
+            elapsed = time.monotonic() - t0
             if r.status_code == 200:
                 data = r.json()
                 cands = data.get("candidates") or []
                 if not cands:
-                    return LLMResponse(ok=False, error="sin candidatos (bloqueado)")
+                    return LLMResponse(ok=False, error="sin candidatos (bloqueado)", seconds=elapsed, attempts=attempt)
                 parts = cands[0].get("content", {}).get("parts", [])
                 finish = cands[0].get("finishReason")
                 if finish == "MAX_TOKENS" and not any("functionCall" in p for p in parts):
-                    return LLMResponse(ok=False, parts=parts, error="respuesta cortada")
-                return LLMResponse(ok=True, parts=parts)
+                    return LLMResponse(ok=False, parts=parts, error="respuesta cortada", seconds=elapsed,
+                                       attempts=attempt)
+                if attempt > 1 or elapsed > 10:
+                    log.warning("Gemini lento: %.1f s, %s intento(s)", elapsed, attempt)
+                return LLMResponse(ok=True, parts=parts, seconds=elapsed, attempts=attempt)
 
             # 429 = cuota agotada, 4xx = petición mala: reintentar no arregla nada.
             if r.status_code < 500:
                 log.error("Gemini rechazó la petición (%s): %s", r.status_code, r.text[:300])
-                return LLMResponse(ok=False, error=f"HTTP {r.status_code}")
-            log.warning("Gemini: error %s (intento %s)", r.status_code, attempt)
+                return LLMResponse(ok=False, error=f"HTTP {r.status_code}", seconds=elapsed, attempts=attempt)
+            log.warning("Gemini: error %s en el intento %s (%.1f s)", r.status_code, attempt, elapsed)
 
-        return LLMResponse(ok=False, error="Gemini no disponible")
+        return LLMResponse(ok=False, error="Gemini no disponible", seconds=time.monotonic() - t0,
+                           attempts=len(ATTEMPT_TIMEOUTS))
 
 
 llm = GeminiClient()

@@ -154,6 +154,9 @@ class AgentResult:
     reply: str
     actions: List[str] = field(default_factory=list)
     used_llm: bool = True
+    llm_seconds: float = 0.0
+    llm_calls: int = 0
+    llm_retries: int = 0
 
 
 class Agent:
@@ -226,19 +229,27 @@ class Agent:
         contents = build_contents(self.db.history(conv["id"], settings.history_messages), conv["origin"])
         actions: List[str] = []
 
+        spent = {"s": 0.0, "n": 0, "r": 0}
+
+        def done(reply: str, acts: List[str]) -> AgentResult:
+            return AgentResult(reply, acts, llm_seconds=spent["s"], llm_calls=spent["n"], llm_retries=spent["r"])
+
         for _ in range(MAX_TOOL_ROUNDS + 1):
             resp = await self.llm.generate(system, contents, TOOLS)
+            spent["s"] += getattr(resp, "seconds", 0.0)
+            spent["n"] += 1
+            spent["r"] += max(0, getattr(resp, "attempts", 1) - 1)
             if not resp.ok:
                 log.error("LLM sin respuesta válida: %s", resp.error)
                 if "humano" not in actions:
                     await self.handoff(clinic, conv, f"El asistente falló ({resp.error})")
-                return AgentResult(FALLBACK_REPLY, actions + ["fallback"])
+                return done(FALLBACK_REPLY, actions + ["fallback"])
 
             if not resp.calls:
                 text = resp.text
                 if not text:
                     break
-                return AgentResult(text, actions)
+                return done(text, actions)
 
             # Se devuelven las partes tal cual (incluida la firma de
             # razonamiento que exigen los Gemini 3) y luego los resultados.
@@ -253,4 +264,4 @@ class Agent:
 
         if "humano" not in actions:
             await self.handoff(clinic, conv, "El asistente no supo qué responder")
-        return AgentResult(FALLBACK_REPLY, actions + ["fallback"])
+        return done(FALLBACK_REPLY, actions + ["fallback"])

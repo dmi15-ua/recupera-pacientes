@@ -226,3 +226,24 @@ def test_unknown_question_reaches_reception(db, make_agent):
     assert (req["kind"], req["detail"]) == ("duda", "¿Tenéis parking?")
     assert "Pregunta de un paciente" in notify.sent[-1]["text"]
     assert db.open_conversation("c1", "+34600111222")["mode"] == "bot"  # sigue atendiendo
+
+
+def test_slow_reply_does_not_block_others(db, make_agent):
+    """Varias conversaciones se atienden a la vez y quedan sus tiempos registrados."""
+    import asyncio
+    import time as _time
+    agent, llm = make_agent()
+
+    async def slow_generate(system, contents, tools=None, max_tokens=1024):
+        await asyncio.sleep(0.4)
+        return text("ok")
+
+    llm.generate = slow_generate
+    for i in range(4):
+        run(service.handle_inbound(db, agent, msg(f"hola {i}", f"w{i}", phone=f"+3460011100{i}")))
+    service.TIMINGS.clear()
+    t0 = _time.monotonic()
+    run(service.tick(db, agent, t=now() + 60))
+    assert _time.monotonic() - t0 < 1.2   # en serie serían 1.6 s
+    assert len(whatsapp.outbox) == 4 and len(service.TIMINGS) == 4
+    assert {"cola_s", "ia_s", "envio_s", "total_s"} <= set(service.TIMINGS[0])

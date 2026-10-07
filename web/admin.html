@@ -351,6 +351,14 @@ async function renderWa(v){
     hk.append(ok(h.firma_ok, `${t} · ${h.firma_ok ? (h.eventos || []).join(', ') || 'sin eventos' : 'firma no válida'}`,
       h.firma_ok ? '' : 'WA_APP_SECRET no coincide con la clave secreta de la app en Meta'));
   }
+  const tm = el('div', 'card'); tm.append(el('h3', '', 'Velocidad de las últimas respuestas'));
+  if (!(d.ultimas_respuestas || []).length) tm.append(el('div', 'muted', 'Aún ninguna desde el último despliegue.'));
+  for (const x of (d.ultimas_respuestas || []).slice(0, 8)){
+    const t = new Date(x.hora * 1000).toLocaleTimeString('es-ES');
+    const lento = x.total_s > 15;
+    tm.append(ok(!lento, `${t} · total ${x.total_s} s (cola ${x.cola_s} s · IA ${x.ia_s} s${x.reintentos_ia ? ' · ' + x.reintentos_ia + ' reintento(s)' : ''} · envío ${x.envio_s} s)`,
+      lento ? 'si "IA" es lo grande, el retraso es de Gemini; si es "envío", de Meta' : ''));
+  }
   const sub = el('div', 'card'); sub.append(el('h3', '', 'Suscripción de la cuenta de WhatsApp'));
   const wi = el('input'); wi.placeholder = 'ID de la cuenta de WhatsApp Business'; try { wi.value = localStorage.getItem('rp_waba') || ''; } catch (e) {}
   const out = el('div', 'muted');
@@ -365,7 +373,7 @@ async function renderWa(v){
   const bs = el('button', 'primary', 'Suscribir esta app'); bs.onclick = () => run(true);
   const rw = el('div', 'row'); rw.append(bc, bs);
   sub.append(el('div', 'muted', 'Sin esta suscripción, Meta no avisa a la app de los mensajes que recibe el número.'), wi, rw, out);
-  box.append(g, w, hk, sub);
+  box.append(g, w, hk, tm, sub);
   for (const c of d.clinicas){
     const k = el('div', 'card'); k.append(el('h3', '', c.nombre));
     if (!c.phone_number_id) k.append(ok(false, 'Sin Phone number ID', 'ponlo en Clínicas → Editar'));
