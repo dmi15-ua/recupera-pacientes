@@ -118,3 +118,20 @@ def test_dev_simulator_requires_admin(client):
     assert client.post("/api/dev/mensaje", json=body).status_code == 401
     r = client.post("/api/dev/mensaje", json=body, headers={"Authorization": "Bearer admin"})
     assert r.status_code == 200
+
+
+def test_panel_funnel(client):
+    db = app.state.db
+    now = int(time.time())
+    for i in range(3):
+        call_id = db.add_missed_call("c1", f"+3460022200{i}", f"f{i}", now)
+        if i < 2:
+            db.set_missed_status(call_id, "enviado")
+    conv = db.get_or_open_conversation("c1", "+34600222000", "llamada_perdida")
+    db.add_message(conv["id"], "patient", "hola")
+    db.add_request("c1", conv["id"], "cita", "+34600222000")
+    db.get_or_open_conversation("c1", "+34600222001", "llamada_perdida")  # sin respuesta
+    r = client.get("/api/panel/resumen", headers={"Authorization": "Bearer panel-c1"})
+    f = r.json()["embudo_30d"]
+    assert f["perdidas"] == 3 and f["enviados"] == 2 and f["respondieron"] == 1 and f["citas"] == 1
+    assert client.get("/api/panel/resumen", headers={"Authorization": "Bearer panel-c2"}).json()["embudo_30d"]["perdidas"] == 0
