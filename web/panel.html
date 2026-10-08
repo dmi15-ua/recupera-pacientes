@@ -104,7 +104,7 @@ section{display:flex;flex-direction:column;min-width:0}
 <script>
 const KIND = {cita: '📅 Solicitud de cita', urgencia: '🚨 Urgencia', humano: '🙋 Quiere hablar con alguien', llamar: '📞 Devolver llamada', duda: '❓ Pregunta pendiente'};
 let token = '';
-try { localStorage.removeItem('rp_token'); } catch (e) {}
+try { localStorage.removeItem('rp_token'); token = sessionStorage.getItem('rp_token') || ''; } catch (e) {}
 let current = null;
 
 const $ = id => document.getElementById(id);
@@ -126,9 +126,10 @@ function showLogin(err){
 $('login').addEventListener('submit', e => {
   e.preventDefault();
   token = $('token').value.trim();
+  try { sessionStorage.setItem('rp_token', token); } catch (e) {}
   load();
 });
-$('logout').onclick = () => { token = ''; showLogin(); };
+$('logout').onclick = () => { token = ''; try { sessionStorage.removeItem('rp_token'); } catch (e) {} showLogin(); };
 
 function badge(c){
   if (!c.open) return el('span', 'badge b-cerrada', 'Cerrada');
