@@ -1,76 +1,69 @@
 ---
 name: prospeccion-clinicas
-description: Busca clínicas médicas privadas en las provincias que indique el usuario usando la API oficial de Google Places (valoraciones, horarios y teléfonos de Google), detecta quejas por no coger el teléfono, las clasifica y prepara mensajes de primer contacto para RecuperaPacientes. Úsala cuando se pida buscar clientes, prospectos, leads o clínicas candidatas.
+description: Prepara la prospección de clínicas médicas privadas en las provincias que indique el usuario - lista las clínicas, genera una hoja de comprobación (xlsx) para mirar sus reseñas de Google y su teléfono a mano, recalcula el ranking con lo que el usuario anota y redacta los mensajes de primer contacto para RecuperaPacientes. Úsala cuando se pida buscar clientes, prospectos, leads o clínicas candidatas.
 ---
 
-# Prospección de clínicas con Google Places
+# Prospección de clínicas para RecuperaPacientes
 
 RecuperaPacientes escribe por WhatsApp a quien llamó a una clínica y no fue atendido. La clínica
 ideal es la que **recibe muchas llamadas y no puede cogerlas todas**.
 
-**Única fuente: Google** (reseñas, horario, teléfono y web de la ficha de Google Maps), a través de la
-API oficial. No uses directorios, foros ni búsqueda web general para encontrar clínicas o reseñas.
-No hagas scraping de la web de Google Maps: incumple sus condiciones, se bloquea y no es estable.
+## Cómo funciona (y por qué así)
+No hay forma gratuita y legítima de leer en bloque las reseñas de Google: la API oficial de Google
+Places es de pago y raspar Google Maps incumple sus condiciones. El usuario no usa APIs de pago, así
+que el reparto es este:
 
-## Antes de empezar
-1. Hace falta la variable `GOOGLE_PLACES_API_KEY`. Si no existe, **para y explica al usuario cómo
-   conseguirla**, sin buscar alternativas:
-   1. En <https://console.cloud.google.com> crear un proyecto y activar la facturación (la API tiene
-      una cuota gratuita mensual; comprobar los precios vigentes de *Places API (New)* antes de usarla).
-   2. Activar **Places API (New)**.
-   3. Crear una clave en *APIs y servicios → Credenciales* y restringirla a esa API.
-   4. Ponerla como variable de entorno `GOOGLE_PLACES_API_KEY` en el entorno de la sesión.
-2. El entorno debe poder llegar a `places.googleapis.com` (en este entorno ya llega).
-3. Pide las **provincias** al usuario. Obligatorio; nunca "toda España" ni elijas tú.
+| Lo hace Claude | Lo hace el usuario (en Google Maps) |
+|---|---|
+| Lista las clínicas de la provincia con teléfono y, si aparece, horario | Mira las reseñas de Google y el horario de cada ficha |
+| Genera la hoja de comprobación con enlaces a Maps | Anota nº de reseñas, quejas del teléfono y llamadas de prueba |
+| Recalcula el ranking con lo que anota | |
+| Redacta los mensajes para las clínicas Alta y Media | |
+
+**Evidencia:** una clínica solo sube de prioridad por lo que el usuario ha visto en Google o en una
+llamada de prueba. Las reseñas de directorios o foros **no** cuentan como evidencia.
 
 ## Cliente ideal
 - **Especialidades con más valor por paciente:** dental (ortodoncia, implantes, estética dental),
   medicina estética y dermatología, fisioterapia y osteopatía, podología, ortopedia.
 - **Tipo de negocio:** clínicas privadas independientes o grupos locales de 1 a 3 centros.
 - **Evitar:** franquicias y cadenas (Vitaldent, Sanitas, Dorsia...), hospitales, aseguradoras y centros
-  públicos. El script ya descarta los nombres más comunes; revisa a mano lo que se le escape.
+  públicos.
 
-## Cómo se ejecuta
-Una ejecución por provincia (cada una cuesta peticiones a Google; no repitas sin motivo):
+## Paso 1: listar las clínicas
+- Pide las **provincias** al usuario. Obligatorio; nunca "toda España" ni elijas tú.
+- **Presupuesto fijo:** máximo 4 búsquedas web por provincia (por ejemplo dental, fisioterapia, estética
+  y podología/ortopedia). Sin rondas extra ni ampliar zonas por tu cuenta.
+- De cada clínica recoge solo datos **públicos de la empresa**: nombre, especialidad, teléfono, y el
+  horario si aparece. Descarta cadenas, hospitales y públicas. Lo que no sepas, déjalo en `?`.
+- Guarda la lista en un CSV con las columnas `nombre,provincia,especialidad,telefono,horario_huecos`.
+  `horario_huecos` es `Sí` solo si has visto que cierra a mediodía o antes de las 18:00 entre semana
+  (o no abre sábados); si no lo sabes, `?`.
 
+## Paso 2: generar la hoja
 ```bash
-python .claude/skills/prospeccion-clinicas/scripts/google_places.py \
-  --provincia "Almería" --especialidad "clínica dental" --especialidad "fisioterapia" \
-  --especialidad "clínica estética" --especialidad "podología" --paginas 2 \
-  --out prospectos/almeria.csv
+python .claude/skills/prospeccion-clinicas/scripts/generar_hoja.py clinicas.csv prospectos/hoja_comprobacion.xlsx
 ```
+- Ordena las clínicas por puntos iniciales y marca las 10 primeras con ★. `prospectos/` está en `.gitignore`.
+- La hoja lleva las fórmulas de prioridad, puntos y ranking, y una hoja «Cómo usarla».
+- Si hay LibreOffice, recalcula para que los valores se vean al abrir; si no, Excel y Google Sheets
+  calculan al abrir.
+- Entrégala al usuario (`SendUserFile`) y explica en pocas líneas qué rellenar: nº de reseñas, si hay
+  queja de teléfono en reseñas recientes (con la frase, sin nombre del autor), llamada de prueba y si
+  es cadena.
 
-- Cada especialidad lanza una búsqueda de hasta `--paginas` páginas de 20 clínicas (máx. 3).
-- Devuelve un JSON con el resumen y el top 10, y guarda el CSV completo. `prospectos/` ya está en `.gitignore`.
-- **Presupuesto:** 4 especialidades × 2 páginas = 8 peticiones por provincia. No pases de ahí sin que
-  el usuario lo pida.
+## Paso 3: recalcular y clasificar
+Cuando el usuario devuelva la hoja rellena, léela con `openpyxl` (dos cargas: fórmulas y
+`data_only=True` tras recalcular) y entrega:
+1. **El ranking** de las 5 mejores (10 si lo piden), con puntos y motivo, citando la frase de la reseña.
+2. Un recuento honesto: cuántas Alta, Media, por verificar y descartadas.
+3. Los mensajes (abajo) para las Alta y Media.
 
-## Qué calcula (no lo recalcules a mano)
-- **Quejas de teléfono** en las reseñas de Google (la API da hasta 5 por clínica, las más relevantes;
-  solo cuentan las de los últimos 36 meses). Se guarda la frase, la fecha y las estrellas; **nunca el
-  nombre del autor**.
-- **Horario** de Google: cierra a mediodía entre semana, cierra a las 18:00 o antes, no abre sábados.
-- **Demanda**: más de 100 reseñas. **Móvil**: número que empieza por 6 o 7 (puede recibir WhatsApp).
-
-| Prioridad | Cuándo |
-|---|---|
-| **Alta** | Al menos una reseña reciente de Google que se queja del teléfono |
-| **Media** | Sin queja, pero cierra a mediodía o pronto entre semana, o no abre sábados con más de 100 reseñas |
-| **Por verificar** | Cumple el cliente ideal sin ninguna señal |
-
-**Puntuación de potencial (0 a 10):** prioridad Alta 5 / Media 3 / Por verificar 1, + valor por paciente
-(dental o estética 2; fisioterapia, podología u ortopedia 1), + 1 si tiene móvil, + 1 si tiene más de
-100 reseñas. Desempate: más señales comprobadas.
-
-## Cómo informar
-1. **Primero el ranking** de las 5 mejores (10 si lo piden), con puntos y motivo, citando la frase de
-   la reseña y el enlace de Google Maps (`fuente`).
-2. Un recuento honesto: cuántas clínicas válidas, cuántas con queja de teléfono, cuántas descartadas.
-3. La ruta del CSV.
-4. **Sé claro con los límites**: Google solo da 5 reseñas por clínica, así que que una clínica no tenga
-   queja no significa que no pierda llamadas, y es un ranking de hipótesis. Si hay pocas Alta, dilo;
-   no las inventes ni las infles.
-5. Mensajes de primer contacto para las Alta y Media (abajo).
+**Prioridad:** Alta = queja de teléfono en reseña reciente o llamada de prueba sin respuesta. Media =
+horario con huecos. Por verificar = sin señales. Descartar = cadena.
+**Puntos (0-10):** prioridad Alta 5 / Media 3 / Por verificar 1, + valor de la especialidad (dental o
+estética 2, resto 1), + 1 si tiene móvil (6 o 7), + 1 si tiene más de 100 reseñas en Google.
+Es un ranking de **hipótesis**: dilo siempre. Si hay pocas Alta, dilo; no las infles.
 
 ## Mensajes
 Reglas: 3 o 4 frases, tono cercano, una sola petición (una demo corta), nada de exagerar. **No
@@ -111,10 +104,7 @@ confirme. ¿Os enseño una demo corta?
   en la demo.
 
 ## Reglas
-- Solo datos de la **empresa** (nombre, dirección, teléfono, web, horario, valoración). No guardes
-  nombres de autores de reseñas ni de profesionales.
-- Las reseñas de Google se usan para detectar un problema de contacto, no se republican.
-  Cumple las condiciones de la API de Google Places (no cachear datos más de lo permitido).
-- No envíes nada: la skill prepara la lista y los textos. El envío es decisión del usuario.
+- Solo datos de la **empresa**. No guardes nombres de autores de reseñas ni de profesionales.
+- No envíes nada: la skill prepara la lista, la hoja y los textos. El envío es decisión del usuario.
 - Recuerda una vez, en una línea: las llamadas comerciales deben respetar la Lista Robinson y los
   correos y mensajes comerciales la LSSI y el RGPD (base legal y forma de darse de baja).
