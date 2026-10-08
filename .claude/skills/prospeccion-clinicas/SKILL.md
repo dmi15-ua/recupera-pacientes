@@ -52,10 +52,29 @@ Que una clínica tenga móvil en la web no prueba que pierda llamadas. Ordena as
 
 Cada señal lleva su fuente. Si no la tienes, no la pongas. Descarta cadenas, hospitales y públicas.
 
+## Ranking final: las más potentes
+Al terminar la búsqueda, ordena **todas** las clínicas con esta puntuación (0 a 10) y enseña las 5
+mejores (o 10 si el usuario lo pide) en una tabla, con el desglose de puntos:
+
+| Concepto | Puntos |
+|---|---|
+| Prioridad **Alta** (queja de teléfono comprobada) / **Media** / **Por verificar** | 5 / 3 / 1 |
+| Valor por paciente: dental o estética / fisioterapia, podología u ortopedia | 2 / 1 |
+| Tiene móvil que puede recibir WhatsApp | 1 |
+| Independiente o de 1 a 3 centros (solo si está comprobado) | 1 |
+| Más de 100 reseñas (demanda) | 1 |
+
+Desempate: la que tenga más señales **comprobadas**. Solo suman los puntos que tengan fuente; lo que
+está en `?` suma 0. No subas la puntuación por intuición.
+
+Deja claro al enseñarlo que es un ranking de **hipótesis**: ordena por probabilidad y facilidad de
+contacto, no mide que la clínica pierda llamadas. Si las mejores solo llegan a 5 o menos, dilo.
+
 ## Salida
 1. CSV en `prospectos/` (añade la carpeta a `.gitignore` si falta) con columnas:
-   `prioridad, nombre, municipio, especialidad, web, telefono, movil_whatsapp, email, señales, fuentes, mensaje`.
-2. En el chat, una tabla con todas, ordenadas por prioridad:
+   `ranking, potencial, prioridad, nombre, municipio, especialidad, web, telefono, movil_whatsapp, email, señales, fuentes, mensaje`.
+2. En el chat, **primero el ranking** de las más potentes y debajo la tabla con todas, ordenadas por
+   prioridad:
 
    | Clínica | Municipio | Teléfono | ¿Móvil/WhatsApp? | Prioridad | Motivo (con fuente) |
 
