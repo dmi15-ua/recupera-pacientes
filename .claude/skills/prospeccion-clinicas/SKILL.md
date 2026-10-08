@@ -1,86 +1,76 @@
 ---
 name: prospeccion-clinicas
-description: Busca clínicas médicas privadas en las provincias que indique el usuario (dental, estética, fisioterapia, podología, ortopedia...), las ordena por prioridad con señales públicas de que pierden llamadas y prepara mensajes de primer contacto y respuestas a objeciones para RecuperaPacientes. Úsala cuando se pida buscar clientes, prospectos, leads o clínicas candidatas.
+description: Busca clínicas médicas privadas en las provincias que indique el usuario usando la API oficial de Google Places (valoraciones, horarios y teléfonos de Google), detecta quejas por no coger el teléfono, las clasifica y prepara mensajes de primer contacto para RecuperaPacientes. Úsala cuando se pida buscar clientes, prospectos, leads o clínicas candidatas.
 ---
 
-# Prospección de clínicas para RecuperaPacientes
+# Prospección de clínicas con Google Places
 
 RecuperaPacientes escribe por WhatsApp a quien llamó a una clínica y no fue atendido. La clínica
 ideal es la que **recibe muchas llamadas y no puede cogerlas todas**.
 
+**Única fuente: Google** (reseñas, horario, teléfono y web de la ficha de Google Maps), a través de la
+API oficial. No uses directorios, foros ni búsqueda web general para encontrar clínicas o reseñas.
+No hagas scraping de la web de Google Maps: incumple sus condiciones, se bloquea y no es estable.
+
+## Antes de empezar
+1. Hace falta la variable `GOOGLE_PLACES_API_KEY`. Si no existe, **para y explica al usuario cómo
+   conseguirla**, sin buscar alternativas:
+   1. En <https://console.cloud.google.com> crear un proyecto y activar la facturación (la API tiene
+      una cuota gratuita mensual; comprobar los precios vigentes de *Places API (New)* antes de usarla).
+   2. Activar **Places API (New)**.
+   3. Crear una clave en *APIs y servicios → Credenciales* y restringirla a esa API.
+   4. Ponerla como variable de entorno `GOOGLE_PLACES_API_KEY` en el entorno de la sesión.
+2. El entorno debe poder llegar a `places.googleapis.com` (en este entorno ya llega).
+3. Pide las **provincias** al usuario. Obligatorio; nunca "toda España" ni elijas tú.
+
 ## Cliente ideal
 - **Especialidades con más valor por paciente:** dental (ortodoncia, implantes, estética dental),
   medicina estética y dermatología, fisioterapia y osteopatía, podología, ortopedia.
-- **Tipo de negocio:** clínicas privadas independientes o grupos locales de 1 a 3 centros: el dueño es
-  accesible, decide rápido y tiene recepción propia.
-- **Evitar:** grandes franquicias y cadenas (Vitaldent, Sanitas Dental, Dorsia...), hospitales y
-  clínicas públicas. Tienen centralita corporativa y compras complejas.
+- **Tipo de negocio:** clínicas privadas independientes o grupos locales de 1 a 3 centros.
+- **Evitar:** franquicias y cadenas (Vitaldent, Sanitas, Dorsia...), hospitales, aseguradoras y centros
+  públicos. El script ya descarta los nombres más comunes; revisa a mano lo que se le escape.
 
-## Entrada
-- **Provincias**: las que indique el usuario. Obligatorio; si no las da, pídelas. Nunca "toda España"
-  ni elijas ciudades tú.
-- **Especialidades**: las que indique; por defecto, las del cliente ideal.
+## Cómo se ejecuta
+Una ejecución por provincia (cada una cuesta peticiones a Google; no repitas sin motivo):
 
-## Presupuesto fijo (no insistas)
-- **Máximo 4 búsquedas web por provincia** y 3 páginas abiertas por provincia. Para al llegar al tope,
-  aunque salgan pocas. Sin rondas extra ni ampliar a otras zonas por tu cuenta.
-- Al terminar, di cuántas búsquedas gastaste y, si salió poco, qué podría añadirse (otra provincia u
-  otra especialidad). Seguir lo decide el usuario.
+```bash
+python .claude/skills/prospeccion-clinicas/scripts/google_places.py \
+  --provincia "Almería" --especialidad "clínica dental" --especialidad "fisioterapia" \
+  --especialidad "clínica estética" --especialidad "podología" --paginas 2 \
+  --out prospectos/almeria.csv
+```
 
-## Cómo buscar
-1. **Directorio (2 búsquedas):** localiza clínicas de la provincia por especialidad
-   (`clínica dental {provincia}`, `fisioterapia {provincia}`, `clínica estética {provincia}`...).
-   De cada una recoge solo datos **públicos de la empresa**: nombre, municipio, especialidad, web,
-   teléfono, si el número es móvil (empieza por 6 o 7: puede recibir WhatsApp), email genérico
-   (info@, recepcion@) y horario si aparece.
-2. **Señales de pérdida de llamadas (2 búsquedas):** reseñas que se quejan del teléfono. Las fuentes
-   que funcionan son Doctoralia y Masquemedicos (`/opiniones`). La frase literal casi nunca aparece:
-   busca variantes ("llamé varias veces", "no hay manera de pedir cita", "tardan días en devolver la
-   llamada"). Los centros de salud públicos no valen.
-3. Lo que no puedas comprobar se queda en `?`. Sin acceso a Google Maps ni a las webs de las clínicas,
-   a menudo no sabrás el horario real ni si hay reserva online ni si tienen bot. **Instagram no se
-   puede verificar con la búsqueda web: no afirmes que una cuenta está activa.**
+- Cada especialidad lanza una búsqueda de hasta `--paginas` páginas de 20 clínicas (máx. 3).
+- Devuelve un JSON con el resumen y el top 10, y guarda el CSV completo. `prospectos/` ya está en `.gitignore`.
+- **Presupuesto:** 4 especialidades × 2 páginas = 8 peticiones por provincia. No pases de ahí sin que
+  el usuario lo pida.
 
-## Prioridad (es una hipótesis, no una cualificación)
-Que una clínica tenga móvil en la web no prueba que pierda llamadas. Ordena así y dilo claramente:
+## Qué calcula (no lo recalcules a mano)
+- **Quejas de teléfono** en las reseñas de Google (la API da hasta 5 por clínica, las más relevantes;
+  solo cuentan las de los últimos 36 meses). Se guarda la frase, la fecha y las estrellas; **nunca el
+  nombre del autor**.
+- **Horario** de Google: cierra a mediodía entre semana, cierra a las 18:00 o antes, no abre sábados.
+- **Demanda**: más de 100 reseñas. **Móvil**: número que empieza por 6 o 7 (puede recibir WhatsApp).
 
 | Prioridad | Cuándo |
 |---|---|
-| **Alta** | Al menos una reseña comprobada que se queja de no poder contactar por teléfono (cita la reseña y su URL) |
-| **Media** | Sin queja comprobada, pero con señal estructural comprobada: horario con huecos (cierra a mediodía, sin tardes o sin sábados), sin reserva online, o mucha demanda (más de 100 reseñas) con equipo pequeño |
-| **Por verificar** | Cumple el cliente ideal, pero sin ninguna señal comprobada |
+| **Alta** | Al menos una reseña reciente de Google que se queja del teléfono |
+| **Media** | Sin queja, pero cierra a mediodía o pronto entre semana, o no abre sábados con más de 100 reseñas |
+| **Por verificar** | Cumple el cliente ideal sin ninguna señal |
 
-Cada señal lleva su fuente. Si no la tienes, no la pongas. Descarta cadenas, hospitales y públicas.
+**Puntuación de potencial (0 a 10):** prioridad Alta 5 / Media 3 / Por verificar 1, + valor por paciente
+(dental o estética 2; fisioterapia, podología u ortopedia 1), + 1 si tiene móvil, + 1 si tiene más de
+100 reseñas. Desempate: más señales comprobadas.
 
-## Ranking final: las más potentes
-Al terminar la búsqueda, ordena **todas** las clínicas con esta puntuación (0 a 10) y enseña las 5
-mejores (o 10 si el usuario lo pide) en una tabla, con el desglose de puntos:
-
-| Concepto | Puntos |
-|---|---|
-| Prioridad **Alta** (queja de teléfono comprobada) / **Media** / **Por verificar** | 5 / 3 / 1 |
-| Valor por paciente: dental o estética / fisioterapia, podología u ortopedia | 2 / 1 |
-| Tiene móvil que puede recibir WhatsApp | 1 |
-| Independiente o de 1 a 3 centros (solo si está comprobado) | 1 |
-| Más de 100 reseñas (demanda) | 1 |
-
-Desempate: la que tenga más señales **comprobadas**. Solo suman los puntos que tengan fuente; lo que
-está en `?` suma 0. No subas la puntuación por intuición.
-
-Deja claro al enseñarlo que es un ranking de **hipótesis**: ordena por probabilidad y facilidad de
-contacto, no mide que la clínica pierda llamadas. Si las mejores solo llegan a 5 o menos, dilo.
-
-## Salida
-1. CSV en `prospectos/` (añade la carpeta a `.gitignore` si falta) con columnas:
-   `ranking, potencial, prioridad, nombre, municipio, especialidad, web, telefono, movil_whatsapp, email, señales, fuentes, mensaje`.
-2. En el chat, **primero el ranking** de las más potentes y debajo la tabla con todas, ordenadas por
-   prioridad:
-
-   | Clínica | Municipio | Teléfono | ¿Móvil/WhatsApp? | Prioridad | Motivo (con fuente) |
-
-   y la ruta del CSV.
-3. Un **mensaje de primer contacto** por clínica Alta o Media, listo para copiar, adaptado a su canal
-   (WhatsApp si tiene móvil; si no, email o llamada). Usa una señal real si la hay.
+## Cómo informar
+1. **Primero el ranking** de las 5 mejores (10 si lo piden), con puntos y motivo, citando la frase de
+   la reseña y el enlace de Google Maps (`fuente`).
+2. Un recuento honesto: cuántas clínicas válidas, cuántas con queja de teléfono, cuántas descartadas.
+3. La ruta del CSV.
+4. **Sé claro con los límites**: Google solo da 5 reseñas por clínica, así que que una clínica no tenga
+   queja no significa que no pierda llamadas, y es un ranking de hipótesis. Si hay pocas Alta, dilo;
+   no las inventes ni las infles.
+5. Mensajes de primer contacto para las Alta y Media (abajo).
 
 ## Mensajes
 Reglas: 3 o 4 frases, tono cercano, una sola petición (una demo corta), nada de exagerar. **No
@@ -90,17 +80,19 @@ prometas lo que el producto no hace:**
 - De noche **no** escribe: aplaza el mensaje a la franja permitida. No digas que atiende "fuera de horario".
 - La puesta en marcha depende de que Meta apruebe la plantilla de WhatsApp: no prometas plazos.
 - **No inventes precio ni prueba gratuita.** Si el usuario no los ha definido, ofrece solo una demo y
-  deja `[PRECIO]` o `[PRUEBA]` marcados para que los complete.
+  deja `[PRECIO]` o `[PRUEBA]` marcados.
+- **No cites ni imites a un cliente concreto de una reseña.** Habla de "algunos pacientes comentan que
+  cuesta contactar por teléfono".
 
-**WhatsApp:**
+**WhatsApp (si tiene móvil):**
 ```text
-Hola, buenos días. Escribo al responsable de recepción de [Clínica]. [Si hay señal real: He visto que
+Hola, buenos días. Escribo al responsable de recepción de [Clínica]. [Si hay queja: He visto que
 algunos pacientes comentan que cuesta contactar por teléfono.] Tenemos una herramienta que escribe por
 WhatsApp, a los pocos minutos, a quien llamó y no pudo ser atendido, para no perder esa cita. ¿Le puedo
 enseñar una demo de 5 minutos?
 ```
 
-**Instagram o email:**
+**Email o llamada (si solo tiene fijo):**
 ```text
 Hola, equipo de [Clínica]. Una pregunta rápida: cuando recepción está ocupada y alguien llama sin que
 le cojan, ¿le escribís por WhatsApp para no perder la cita? Ayudamos a clínicas de [provincia] con una
@@ -119,8 +111,10 @@ confirme. ¿Os enseño una demo corta?
   en la demo.
 
 ## Reglas
-- Solo datos de la **empresa**. No incluyas nombres de profesionales ni de pacientes.
+- Solo datos de la **empresa** (nombre, dirección, teléfono, web, horario, valoración). No guardes
+  nombres de autores de reseñas ni de profesionales.
+- Las reseñas de Google se usan para detectar un problema de contacto, no se republican.
+  Cumple las condiciones de la API de Google Places (no cachear datos más de lo permitido).
 - No envíes nada: la skill prepara la lista y los textos. El envío es decisión del usuario.
 - Recuerda una vez, en una línea: las llamadas comerciales deben respetar la Lista Robinson y los
   correos y mensajes comerciales la LSSI y el RGPD (base legal y forma de darse de baja).
-- Si hay pocas clínicas, entrega lo que haya y dilo; no rellenes con candidatas dudosas.
