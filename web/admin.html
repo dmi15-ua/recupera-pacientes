@@ -82,7 +82,7 @@ pre{white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:14px;ma
 
 <form id="login" hidden>
   <h1>Administración</h1>
-  <input id="token" type="password" placeholder="ADMIN_TOKEN" autocomplete="current-password" required>
+  <input id="token" type="password" placeholder="ADMIN_TOKEN" autocomplete="off" required>
   <button class="primary" type="submit">Entrar</button>
   <div class="err" id="loginErr"></div>
 </form>
@@ -106,7 +106,7 @@ pre{white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:14px;ma
 
 <script>
 let token = '';
-try { localStorage.removeItem('rp_admin'); token = sessionStorage.getItem('rp_admin') || ''; } catch (e) {}
+try { localStorage.removeItem('rp_admin'); sessionStorage.removeItem('rp_admin'); } catch (e) {}
 let data = null, tab = 'clinicas';
 const $ = id => document.getElementById(id);
 function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -120,8 +120,8 @@ async function api(path, opts = {}){
   return j;
 }
 function showLogin(err){ $('app').hidden = true; $('login').hidden = false; $('loginErr').textContent = err || ''; }
-$('login').onsubmit = e => { e.preventDefault(); token = $('token').value.trim(); try { sessionStorage.setItem('rp_admin', token); } catch (e) {} load(); };
-$('logout').onclick = () => { token = ''; try { sessionStorage.removeItem('rp_admin'); } catch (e) {} showLogin(); };
+$('login').onsubmit = e => { e.preventDefault(); token = $('token').value.trim(); load(); };
+$('logout').onclick = () => { token = ''; showLogin(); };
 $('tabs').onclick = e => { const t = e.target.closest('button')?.dataset.t; if (t){ tab = t; render(); } };
 
 async function load(){
