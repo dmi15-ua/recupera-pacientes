@@ -25,6 +25,21 @@ def test_valor_y_movil():
     assert gh.es_movil("950 681 301") == 0 and gh.es_movil("") == 0
 
 
+def test_cadena_va_al_final_y_no_es_primera(tmp_path):
+    entrada = tmp_path / "c.csv"
+    entrada.write_text("nombre,provincia,especialidad,telefono,horario_huecos,web,cadena,notas\n"
+                       "Cadena,Almería,Dental,950 1,Sí,?,Sí,grupo\nIndependiente,Almería,Dental,,?,No encontrada,,\n",
+                       encoding="utf-8")
+    clinicas = gh.leer(str(entrada))
+    assert [c["nombre"] for c in clinicas] == ["Independiente", "Cadena"]
+    salida = tmp_path / "h.xlsx"
+    gh.construir(clinicas, str(salida))
+    ws = load_workbook(salida)["Comprobación"]
+    assert ws["B2"].value.startswith("★") and not ws["B3"].value
+    assert ws["K2"].value == "No encontrada" and ws["P3"].value == "Sí" and ws["Q3"].value == "grupo"
+    assert 'IF(K2="Sin web",1,0)' in ws["S2"].value
+
+
 def test_orden_y_hoja(tmp_path):
     entrada = tmp_path / "c.csv"
     entrada.write_text(CSV, encoding="utf-8")
@@ -37,5 +52,5 @@ def test_orden_y_hoja(tmp_path):
     ws = wb["Comprobación"]
     assert ws["C2"].value == "Dental Tres" and ws["B2"].value.startswith("★")
     assert "google.com/maps/search" in ws["G2"].hyperlink.target
-    assert ws["Q2"].value.startswith("=IF(") and ws["S2"].value.startswith("=IF(")
+    assert ws["R2"].value.startswith("=IF(") and ws["T2"].value.startswith("=IF(")
     assert wb["Cómo usarla"]["A1"].value == "Qué es"

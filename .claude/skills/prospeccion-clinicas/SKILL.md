@@ -16,7 +16,7 @@ que el reparto es este:
 | Lo hace Claude | Lo hace el usuario (en Google Maps) |
 |---|---|
 | Lista las clínicas de la provincia con teléfono y, si aparece, horario | Mira las reseñas de Google y el horario de cada ficha |
-| Genera la hoja de comprobación con enlaces a Maps | Anota nº de reseñas, quejas del teléfono y llamadas de prueba |
+| Genera la hoja de comprobación con enlaces a Maps | Anota nº de reseñas, quejas del teléfono, «Sin web» y llamadas de prueba |
 | Recalcula el ranking con lo que anota | |
 | Redacta los mensajes para las clínicas Alta y Media | |
 
@@ -36,9 +36,17 @@ llamada de prueba. Las reseñas de directorios o foros **no** cuentan como evide
   y podología/ortopedia). Sin rondas extra ni ampliar zonas por tu cuenta.
 - De cada clínica recoge solo datos **públicos de la empresa**: nombre, especialidad, teléfono, y el
   horario si aparece. Descarta cadenas, hospitales y públicas. Lo que no sepas, déjalo en `?`.
-- Guarda la lista en un CSV con las columnas `nombre,provincia,especialidad,telefono,horario_huecos`.
-  `horario_huecos` es `Sí` solo si has visto que cierra a mediodía o antes de las 18:00 entre semana
-  (o no abre sábados); si no lo sabes, `?`.
+- **Una búsqueda por clínica, solo para las 10 primeras** (además del presupuesto de listado): busca
+  `{nombre} {municipio} web opiniones` y anota si aparece **web propia** (no un directorio) y si salen
+  malas reseñas. Recuerda los límites: no puedes abrir Google Maps ni las webs, y "no aparece en la
+  búsqueda" no prueba que no tenga web. Escribe `No encontrada`, nunca "no tiene". Esa casilla no
+  suma puntos hasta que el usuario confirma `Sin web` en la ficha de Maps.
+- Comprueba también si es **cadena** (grupo con varias clínicas en distintas provincias): `cadena = Sí`
+  la descarta. Apunta en `notas` lo que encuentres (puntuaciones, direcciones contradictorias, el
+  horario y de quién es). Si no hay malas reseñas, di claramente que no las has encontrado.
+- Guarda la lista en un CSV con las columnas `nombre,provincia,especialidad,telefono,horario_huecos,web,cadena,notas`
+  (las tres últimas son opcionales). `horario_huecos` es `Sí` solo si has visto que cierra a mediodía
+  o antes de las 18:00 entre semana (o no abre sábados) **y es el horario de la clínica**; si no, `?`.
 
 ## Paso 2: generar la hoja
 ```bash
@@ -62,7 +70,7 @@ Cuando el usuario devuelva la hoja rellena, léela con `openpyxl` (dos cargas: f
 **Prioridad:** Alta = queja de teléfono en reseña reciente o llamada de prueba sin respuesta. Media =
 horario con huecos. Por verificar = sin señales. Descartar = cadena.
 **Puntos (0-10):** prioridad Alta 5 / Media 3 / Por verificar 1, + valor de la especialidad (dental o
-estética 2, resto 1), + 1 si tiene móvil (6 o 7), + 1 si tiene más de 100 reseñas en Google.
+estética 2, resto 1), + 1 si tiene móvil (6 o 7), + 1 si tiene más de 100 reseñas en Google, + 1 si el usuario confirma «Sin web».
 Es un ranking de **hipótesis**: dilo siempre. Si hay pocas Alta, dilo; no las infles.
 
 ## Mensajes
