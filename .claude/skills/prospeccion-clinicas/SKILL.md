@@ -1,6 +1,6 @@
 ---
 name: prospeccion-clinicas
-description: Busca clínicas médicas en España (dental, fisioterapia, ortopedia, podología, estética, etc.) que probablemente pierden pacientes por llamadas sin atender, las puntúa con señales públicas y entrega una lista ordenada con un borrador de primer contacto. Úsala cuando se pida buscar clientes, prospectos, leads o clínicas candidatas para RecuperaPacientes.
+description: Busca clínicas médicas privadas en las provincias que indique el usuario (dental, estética, fisioterapia, podología, ortopedia...), las ordena por prioridad con señales públicas de que pierden llamadas y prepara mensajes de primer contacto y respuestas a objeciones para RecuperaPacientes. Úsala cuando se pida buscar clientes, prospectos, leads o clínicas candidatas.
 ---
 
 # Prospección de clínicas para RecuperaPacientes
@@ -8,71 +8,100 @@ description: Busca clínicas médicas en España (dental, fisioterapia, ortopedi
 RecuperaPacientes escribe por WhatsApp a quien llamó a una clínica y no fue atendido. La clínica
 ideal es la que **recibe muchas llamadas y no puede cogerlas todas**.
 
-## Entrada
-Pregunta solo lo que falte (no repitas lo que ya te hayan dicho):
-- **Provincias**: las que indique el usuario (obligatorio; nunca "toda España").
-- **Especialidad**: una o varias; por defecto todas las clínicas médicas privadas (dental, fisioterapia,
-  ortopedia, podología, oftalmología, estética, psicología, medicina general...).
-- **Cantidad**: la que salga dentro del presupuesto (ver abajo); no es un objetivo a cualquier precio.
+## Cliente ideal
+- **Especialidades con más valor por paciente:** dental (ortodoncia, implantes, estética dental),
+  medicina estética y dermatología, fisioterapia y osteopatía, podología, ortopedia.
+- **Tipo de negocio:** clínicas privadas independientes o grupos locales de 1 a 3 centros: el dueño es
+  accesible, decide rápido y tiene recepción propia.
+- **Evitar:** grandes franquicias y cadenas (Vitaldent, Sanitas Dental, Dorsia...), hospitales y
+  clínicas públicas. Tienen centralita corporativa y compras complejas.
 
-## Cómo buscar
-1. Con la búsqueda web, busca clínicas privadas en la zona y especialidad. Varía las consultas
-   (`clínica dental {ciudad}`, `fisioterapia {ciudad} opiniones`, etc.).
-2. Si existe la variable `GOOGLE_PLACES_API_KEY`, úsala para ficha, horario, valoración y nº de reseñas;
-   si no, saca los datos de la web de la clínica y de lo que muestren los buscadores.
-3. Para cada candidata abre su web y recoge solo datos **públicos de la empresa**:
-   nombre, ciudad, especialidad, web, teléfono y email genéricos (info@, recepcion@), horario,
-   si ofrece reserva online, si menciona WhatsApp.
-4. Busca reseñas o menciones sobre el teléfono: "no cogen", "no contestan", "siempre comunica",
-   "imposible contactar", "tardan en responder". Las fuentes que mejor funcionan en España son
-   Doctoralia y Masquemedicos (en cada ficha, `/opiniones`); Google Maps no es accesible sin la API.
-   La frase literal casi nunca aparece en clínicas privadas: busca variantes ("llamé varias veces",
-   "no hay manera de pedir cita", "tardan días en devolver la llamada") y mira la nota de "atención
-   al paciente". Los resultados de centros de salud públicos no valen: descártalos.
+## Entrada
+- **Provincias**: las que indique el usuario. Obligatorio; si no las da, pídelas. Nunca "toda España"
+  ni elijas ciudades tú.
+- **Especialidades**: las que indique; por defecto, las del cliente ideal.
 
 ## Presupuesto fijo (no insistas)
-El usuario da las **provincias**. Trabaja solo en esas, sin ampliar a otras zonas ni repetir rondas.
-- **Máximo 4 búsquedas web por provincia** (por ejemplo: dental, fisioterapia, podología/ortopedia,
-  y una de variantes de la queja) y como mucho 3 páginas abiertas por provincia.
-- Para en cuanto llegues a ese tope, aunque haya pocas candidatas. No hagas más rondas por tu cuenta.
-- Si una provincia no da nada, dilo en una línea y pasa a la siguiente.
-- Al final, di cuántas búsquedas gastaste en total, y si quedó poca cosa, qué podría añadirse
-  (otra provincia, otra especialidad); la decisión de seguir es del usuario.
-- Si el usuario no da provincias, pídelas. No elijas ciudades tú.
+- **Máximo 4 búsquedas web por provincia** y 3 páginas abiertas por provincia. Para al llegar al tope,
+  aunque salgan pocas. Sin rondas extra ni ampliar a otras zonas por tu cuenta.
+- Al terminar, di cuántas búsquedas gastaste y, si salió poco, qué podría añadirse (otra provincia u
+  otra especialidad). Seguir lo decide el usuario.
 
-**Lo que cuenta como candidata** son las de 4 puntos o más con al menos una señal comprobada. No
-subas puntuaciones ni cuentes señales dudosas para llegar a ninguna cifra.
+## Cómo buscar
+1. **Directorio (2 búsquedas):** localiza clínicas de la provincia por especialidad
+   (`clínica dental {provincia}`, `fisioterapia {provincia}`, `clínica estética {provincia}`...).
+   De cada una recoge solo datos **públicos de la empresa**: nombre, municipio, especialidad, web,
+   teléfono, si el número es móvil (empieza por 6 o 7: puede recibir WhatsApp), email genérico
+   (info@, recepcion@) y horario si aparece.
+2. **Señales de pérdida de llamadas (2 búsquedas):** reseñas que se quejan del teléfono. Las fuentes
+   que funcionan son Doctoralia y Masquemedicos (`/opiniones`). La frase literal casi nunca aparece:
+   busca variantes ("llamé varias veces", "no hay manera de pedir cita", "tardan días en devolver la
+   llamada"). Los centros de salud públicos no valen.
+3. Lo que no puedas comprobar se queda en `?`. Sin acceso a Google Maps ni a las webs de las clínicas,
+   a menudo no sabrás el horario real ni si hay reserva online ni si tienen bot. **Instagram no se
+   puede verificar con la búsqueda web: no afirmes que una cuenta está activa.**
 
-## Puntuación (0 a 10)
-Suma, y no pases de 10:
-| Señal | Puntos |
+## Prioridad (es una hipótesis, no una cualificación)
+Que una clínica tenga móvil en la web no prueba que pierda llamadas. Ordena así y dilo claramente:
+
+| Prioridad | Cuándo |
 |---|---|
-| Reseñas que se quejan de no poder contactar por teléfono (cita la reseña) | +4 |
-| Horario telefónico limitado (cierra a mediodía, sin tardes, sin sábados) | +2 |
-| Sin reserva online | +1 |
-| Muchas reseñas (más de 100) con equipo pequeño: mucha demanda | +2 |
-| Sin WhatsApp visible en la web | +1 |
+| **Alta** | Al menos una reseña comprobada que se queja de no poder contactar por teléfono (cita la reseña y su URL) |
+| **Media** | Sin queja comprobada, pero con señal estructural comprobada: horario con huecos (cierra a mediodía, sin tardes o sin sábados), sin reserva online, o mucha demanda (más de 100 reseñas) con equipo pequeño |
+| **Por verificar** | Cumple el cliente ideal, pero sin ninguna señal comprobada |
 
-Descarta o puntúa 0 si es un hospital o una gran cadena con centralita propia, si es una clínica
-pública, o si no hay forma de contactar a la empresa.
-
-**No inventes señales.** Si no pudiste comprobar algo, escribe `?` y no sumes. Cada señal que sume
-debe llevar su fuente (URL). Una candidata sin ninguna señal comprobada no pasa de 2.
+Cada señal lleva su fuente. Si no la tienes, no la pongas. Descarta cadenas, hospitales y públicas.
 
 ## Salida
-1. Guarda un CSV en `prospectos/` (ya está en `.gitignore`: añádelo si falta) con columnas:
-   `puntuacion, nombre, ciudad, especialidad, web, telefono, email, señales, fuentes, borrador`.
-2. En el chat, una tabla corta con las 10 mejores (puntuación, nombre, ciudad, motivo en una frase)
+1. CSV en `prospectos/` (añade la carpeta a `.gitignore` si falta) con columnas:
+   `prioridad, nombre, municipio, especialidad, web, telefono, movil_whatsapp, email, señales, fuentes, mensaje`.
+2. En el chat, una tabla con todas, ordenadas por prioridad:
+
+   | Clínica | Municipio | Teléfono | ¿Móvil/WhatsApp? | Prioridad | Motivo (con fuente) |
+
    y la ruta del CSV.
-3. Un **borrador de primer mensaje** por candidata, de 3-4 frases, personalizado con una señal real
-   (por ejemplo, una reseña) y sin exagerar: propone una demo corta, no prometas resultados.
+3. Un **mensaje de primer contacto** por clínica Alta o Media, listo para copiar, adaptado a su canal
+   (WhatsApp si tiene móvil; si no, email o llamada). Usa una señal real si la hay.
+
+## Mensajes
+Reglas: 3 o 4 frases, tono cercano, una sola petición (una demo corta), nada de exagerar. **No
+prometas lo que el producto no hace:**
+- Escribe al paciente **a los pocos minutos** de la llamada perdida (espera por si le cogen). No digas
+  "en 15 segundos".
+- De noche **no** escribe: aplaza el mensaje a la franja permitida. No digas que atiende "fuera de horario".
+- La puesta en marcha depende de que Meta apruebe la plantilla de WhatsApp: no prometas plazos.
+- **No inventes precio ni prueba gratuita.** Si el usuario no los ha definido, ofrece solo una demo y
+  deja `[PRECIO]` o `[PRUEBA]` marcados para que los complete.
+
+**WhatsApp:**
+```text
+Hola, buenos días. Escribo al responsable de recepción de [Clínica]. [Si hay señal real: He visto que
+algunos pacientes comentan que cuesta contactar por teléfono.] Tenemos una herramienta que escribe por
+WhatsApp, a los pocos minutos, a quien llamó y no pudo ser atendido, para no perder esa cita. ¿Le puedo
+enseñar una demo de 5 minutos?
+```
+
+**Instagram o email:**
+```text
+Hola, equipo de [Clínica]. Una pregunta rápida: cuando recepción está ocupada y alguien llama sin que
+le cojan, ¿le escribís por WhatsApp para no perder la cita? Ayudamos a clínicas de [provincia] con una
+herramienta que lo hace sola a los pocos minutos y deja la solicitud lista para que recepción la
+confirme. ¿Os enseño una demo corta?
+```
+
+## Respuestas a objeciones
+- **"Ya tenemos recepcionista."** No la sustituye: ayuda justo cuando está atendiendo a alguien en
+  consulta o cobrando y no puede coger otra llamada. Recepción sigue confirmando las citas.
+- **"¿Y si dice algo incorrecto?"** Solo usa la información que la clínica nos da. Si no sabe algo, lo
+  dice y avisa a recepción para que responda. No confirma citas ni da consejos médicos.
+- **"¿Es difícil de instalar?"** La configuración la hacemos nosotros con los datos de la clínica; lo
+  que puede tardar es la aprobación de la plantilla por parte de Meta. No des un plazo concreto.
+- **"¿Cuánto cuesta?"** Solo responde si el usuario ha definido precio. Si no, di que se lo explicas
+  en la demo.
 
 ## Reglas
-- Solo datos de la **empresa**. Nada de datos personales de profesionales o pacientes, ni listados
-  de personas.
-- No envíes nada: la skill solo prepara la lista y los borradores. El envío es decisión del usuario.
-- Recuerda al entregar: las llamadas comerciales deben respetar la Lista Robinson y los correos
-  comerciales la LSSI y el RGPD (base legal, forma de darse de baja). Dilo en una línea, sin sermón.
-- Si hay pocas, entrega lo que haya y dilo; no rellenes con candidatas dudosas.
-- En la lista final, solo van las de 4 o más. Las de menos, si las quieres, en una hoja aparte del CSV
-  (`descartadas`) con el motivo.
+- Solo datos de la **empresa**. No incluyas nombres de profesionales ni de pacientes.
+- No envíes nada: la skill prepara la lista y los textos. El envío es decisión del usuario.
+- Recuerda una vez, en una línea: las llamadas comerciales deben respetar la Lista Robinson y los
+  correos y mensajes comerciales la LSSI y el RGPD (base legal y forma de darse de baja).
+- Si hay pocas clínicas, entrega lo que haya y dilo; no rellenes con candidatas dudosas.
