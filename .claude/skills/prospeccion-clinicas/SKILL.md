@@ -10,10 +10,10 @@ ideal es la que **recibe muchas llamadas y no puede cogerlas todas**.
 
 ## Entrada
 Pregunta solo lo que falte (no repitas lo que ya te hayan dicho):
-- **Zona**: ciudad, provincia o "toda España" (si es toda España, reparte por varias ciudades grandes).
+- **Provincias**: las que indique el usuario (obligatorio; nunca "toda España").
 - **Especialidad**: una o varias; por defecto todas las clínicas médicas privadas (dental, fisioterapia,
   ortopedia, podología, oftalmología, estética, psicología, medicina general...).
-- **Cantidad**: por defecto 20 candidatas.
+- **Cantidad**: la que salga dentro del presupuesto (ver abajo); no es un objetivo a cualquier precio.
 
 ## Cómo buscar
 1. Con la búsqueda web, busca clínicas privadas en la zona y especialidad. Varía las consultas
@@ -30,31 +30,18 @@ Pregunta solo lo que falte (no repitas lo que ya te hayan dicho):
    "no hay manera de pedir cita", "tardan días en devolver la llamada") y mira la nota de "atención
    al paciente". Los resultados de centros de salud públicos no valen: descártalos.
 
-## Insiste hasta encontrar clínicas que lo necesiten
-El objetivo no es listar clínicas, es encontrar **las que de verdad necesitan el agente**: las que
-llegan a **4 puntos o más** con al menos una señal comprobada de llamadas sin atender. Una primera
-tanda casi nunca basta, así que no te detengas ahí.
+## Presupuesto fijo (no insistas)
+El usuario da las **provincias**. Trabaja solo en esas, sin ampliar a otras zonas ni repetir rondas.
+- **Máximo 4 búsquedas web por provincia** (por ejemplo: dental, fisioterapia, podología/ortopedia,
+  y una de variantes de la queja) y como mucho 3 páginas abiertas por provincia.
+- Para en cuanto llegues a ese tope, aunque haya pocas candidatas. No hagas más rondas por tu cuenta.
+- Si una provincia no da nada, dilo en una línea y pasa a la siguiente.
+- Al final, di cuántas búsquedas gastaste en total, y si quedó poca cosa, qué podría añadirse
+  (otra provincia, otra especialidad); la decisión de seguir es del usuario.
+- Si el usuario no da provincias, pídelas. No elijas ciudades tú.
 
-Repite por rondas hasta tener la cantidad pedida de candidatas con 4 o más, con un máximo de 6 rondas.
-En cada ronda cambia de ángulo, en este orden:
-1. **Otras consultas** en la misma zona: sinónimos de la queja ("llamé varias veces", "no hay manera
-   de pedir cita", "tardan días en devolver la llamada", "siempre comunica") y de la especialidad.
-2. **Otras especialidades** del listado, si el usuario no limitó a una.
-3. **Otras fuentes**: Doctoralia, Masquemedicos, Páginas Amarillas, directorios de colegios
-   profesionales y la propia web de la clínica (horario, falta de reserva online).
-4. **Zonas cercanas**: municipios del área y provincias vecinas. Si pidieron "toda España", recorre
-   las grandes ciudades una a una (Madrid, Barcelona, Valencia, Sevilla, Zaragoza, Málaga, Bilbao,
-   Alicante, Murcia, Valladolid...).
-5. **Clínicas ya vistas con puntuación baja**: revisa su web y reseñas con más detalle por si te
-   saltaste una señal.
-
-Al terminar cada ronda di en una línea cuántas llevas (por ejemplo "8 de 20 con 4 o más") y qué
-ángulo probarás ahora. Pasa de ronda sin pedir permiso. Pregunta al usuario solo si tras las 6 rondas
-no llegas al objetivo.
-
-**Insistir es buscar más, no aflojar.** No subas la puntuación ni cuentes señales dudosas para
-llegar a la cifra. Si tras las 6 rondas faltan candidatas, entrega las que cumplen, indica cuántas
-faltan, qué rondas probaste y qué haría falta para encontrar más (por ejemplo, la API de Google Places).
+**Lo que cuenta como candidata** son las de 4 puntos o más con al menos una señal comprobada. No
+subas puntuaciones ni cuentes señales dudosas para llegar a ninguna cifra.
 
 ## Puntuación (0 a 10)
 Suma, y no pases de 10:
@@ -86,6 +73,6 @@ debe llevar su fuente (URL). Una candidata sin ninguna señal comprobada no pasa
 - No envíes nada: la skill solo prepara la lista y los borradores. El envío es decisión del usuario.
 - Recuerda al entregar: las llamadas comerciales deben respetar la Lista Robinson y los correos
   comerciales la LSSI y el RGPD (base legal, forma de darse de baja). Dilo en una línea, sin sermón.
-- Si tras todas las rondas hay pocas, entrega lo que haya y dilo; no rellenes con candidatas dudosas.
+- Si hay pocas, entrega lo que haya y dilo; no rellenes con candidatas dudosas.
 - En la lista final, solo van las de 4 o más. Las de menos, si las quieres, en una hoja aparte del CSV
   (`descartadas`) con el motivo.
