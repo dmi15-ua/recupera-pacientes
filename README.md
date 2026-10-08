@@ -168,7 +168,22 @@ web/             landing, ficha de alta, dashboard admin, panel de recepción, p
 tests/           31 tests (lógica, HTTP, alta de clínicas)
 ```
 
+## Alcance: MVP y producto final
+
+**MVP (lo que hay hoy).** El asistente no tiene la agenda: recoge nombre, motivo y preferencia de
+horario y recepción confirma el hueco desde el panel. No requiere integrar nada con la clínica, no
+puede dar una cita mal y el embudo del panel mide cuántos pacientes se recuperan.
+
+**Producto final (fase 2).** Conectar el calendario de la clínica como herramienta del asistente
+(`ver_huecos`, `reservar_cita`) para que ofrezca huecos reales y reserve sin pasar por recepción.
+Arrancamos con Google Calendar (OAuth por clínica). Decisiones pendientes: duración por tratamiento,
+asignación de profesional y qué pasa si dos pacientes piden el mismo hueco.
+
+Antes de construirla, preguntar a las primeras clínicas qué usan: muchas tienen software de gestión
+propio en lugar de Google Calendar, y para esas la integración sería otra.
+
 ## Siguiente paso
 
-- Conectar la agenda (Google Calendar o el software de la clínica) como herramienta del agente.
+- Conversaciones de prueba del asistente (urgencias, precios que no están en la ficha, intentos de que invente).
 - Opt-in por tecla en la llamada de Twilio ("pulsa 1 si quieres que te escribamos").
+- Fase 2: agenda (ver arriba).
