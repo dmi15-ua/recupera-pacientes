@@ -8,6 +8,7 @@
 <style>
 :root{--bg:#F4F2EE;--surface:#fff;--ink:#13201D;--muted:#5B6764;--line:#E3DFD6;--green:#176B4D;--mint:#E4F1EA;--coral:#D9483B;--coral-soft:#FBE9E6;--amber:#9A6700;--amber-soft:#FFF4D6;--out:#D9FDD3;--staff:#DCEBFF}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
 button{font:inherit;cursor:pointer;border:0;border-radius:10px;padding:9px 14px;font-weight:600}
 .primary{background:var(--green);color:#fff}
@@ -25,6 +26,11 @@ header small{color:var(--muted);margin-left:8px}
 main{display:grid;grid-template-columns:360px 1fr;height:calc(100vh - 59px)}
 aside{border-right:1px solid var(--line);overflow:auto;background:var(--surface)}
 aside h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:18px 16px 8px}
+.funnel{margin:0 12px;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.funnel div{background:var(--bg);border-radius:10px;padding:8px 6px;text-align:center}
+.funnel b{display:block;font-size:20px;line-height:1.2}
+.funnel span{font-size:11px;color:var(--muted)}
+.funnel-note{margin:6px 16px 0;font-size:12.5px;color:var(--muted)}
 .req{margin:0 12px 10px;border-radius:12px;padding:12px;background:var(--mint);display:grid;gap:4px}
 .req.urgencia{background:var(--coral-soft)}
 .req.llamar,.req.humano{background:var(--amber-soft)}
@@ -69,7 +75,7 @@ section{display:flex;flex-direction:column;min-width:0}
 <form id="login" hidden>
   <h1>Panel de recepción</h1>
   <p>Introduce el código de acceso de tu clínica.</p>
-  <input id="token" type="password" autocomplete="current-password" placeholder="Código de acceso" required>
+  <input id="token" type="password" autocomplete="off" placeholder="Código de acceso" required>
   <button class="primary" type="submit">Entrar</button>
   <div class="err" id="loginErr"></div>
 </form>
@@ -81,6 +87,9 @@ section{display:flex;flex-direction:column;min-width:0}
   </header>
   <main id="main">
     <aside>
+      <h2>Últimos 30 días</h2>
+      <div class="funnel" id="funnel"></div>
+      <div class="funnel-note" id="funnelNote"></div>
       <h2>Pendiente</h2>
       <div id="requests"></div>
       <h2>Conversaciones</h2>
@@ -95,7 +104,7 @@ section{display:flex;flex-direction:column;min-width:0}
 <script>
 const KIND = {cita: '📅 Solicitud de cita', urgencia: '🚨 Urgencia', humano: '🙋 Quiere hablar con alguien', llamar: '📞 Devolver llamada', duda: '❓ Pregunta pendiente'};
 let token = '';
-try { token = localStorage.getItem('rp_token') || ''; } catch (e) {}
+try { localStorage.removeItem('rp_token'); token = sessionStorage.getItem('rp_token') || ''; } catch (e) {}
 let current = null;
 
 const $ = id => document.getElementById(id);
@@ -117,10 +126,10 @@ function showLogin(err){
 $('login').addEventListener('submit', e => {
   e.preventDefault();
   token = $('token').value.trim();
-  try { localStorage.setItem('rp_token', token); } catch (e) {}
+  try { sessionStorage.setItem('rp_token', token); } catch (e) {}
   load();
 });
-$('logout').onclick = () => { token = ''; try { localStorage.removeItem('rp_token'); } catch (e) {} showLogin(); };
+$('logout').onclick = () => { token = ''; try { sessionStorage.removeItem('rp_token'); } catch (e) {} showLogin(); };
 
 function badge(c){
   if (!c.open) return el('span', 'badge b-cerrada', 'Cerrada');
@@ -136,6 +145,12 @@ async function load(){
   $('login').hidden = true; $('app').hidden = false;
   $('clinicName').textContent = data.clinica;
   $('updated').textContent = 'actualizado ' + new Date().toLocaleTimeString('es-ES', {hour: '2-digit', minute: '2-digit'});
+
+  const f = data.embudo_30d, fb = $('funnel'); fb.replaceChildren();
+  for (const [k, label] of [['perdidas', 'Llamadas perdidas'], ['enviados', 'WhatsApp enviados'], ['respondieron', 'Respondieron'], ['citas', 'Citas pedidas']]){
+    const box = el('div'); box.append(el('b', '', String(f[k])), el('span', '', label)); fb.append(box);
+  }
+  $('funnelNote').textContent = f.perdidas ? `Han respondido ${f.respondieron} de ${f.perdidas} pacientes que llamaron y no fueron atendidos.` : '';
 
   const reqs = $('requests'); reqs.replaceChildren();
   if (!data.solicitudes.length) reqs.append(el('div', 'empty', 'Nada pendiente 🎉'));

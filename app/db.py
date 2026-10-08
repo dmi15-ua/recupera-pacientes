@@ -363,6 +363,23 @@ class Database:
                                       "AND kind = 'cita' AND created_at >= ?"),
         }
 
+    def clinic_funnel(self, clinic_id: str, since: int) -> Dict[str, int]:
+        """Embudo de recuperación: llamadas perdidas -> WhatsApp enviados -> respondieron -> citas pedidas.
+        'Respondieron' y 'citas' cuentan solo conversaciones nacidas de una llamada perdida."""
+        def count(sql):
+            return self._one(sql, (clinic_id, since))["n"]
+        base = ("FROM {T}conversations c WHERE c.clinic_id = ? AND c.origin = 'llamada_perdida' "
+                "AND c.created_at >= ?")
+        return {
+            "perdidas": count("SELECT COUNT(*) AS n FROM {T}missed_calls WHERE clinic_id = ? AND received_at >= ?"),
+            "enviados": count("SELECT COUNT(*) AS n FROM {T}missed_calls WHERE clinic_id = ? "
+                              "AND status = 'enviado' AND received_at >= ?"),
+            "respondieron": count("SELECT COUNT(*) AS n " + base + " AND EXISTS ("
+                                  "SELECT 1 FROM {T}messages m WHERE m.conversation_id = c.id AND m.role = 'patient')"),
+            "citas": count("SELECT COUNT(*) AS n " + base + " AND EXISTS ("
+                           "SELECT 1 FROM {T}requests r WHERE r.conversation_id = c.id AND r.kind = 'cita')"),
+        }
+
     # ------------------------------------------------------------ conversaciones
     def open_conversation(self, clinic_id: str, phone: str) -> Optional[Dict[str, Any]]:
         return self._one("SELECT * FROM {T}conversations WHERE clinic_id = ? AND phone = ? AND open = 1",

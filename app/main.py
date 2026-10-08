@@ -651,8 +651,9 @@ def _own_conversation(request: Request, clinic: Dict, conv_id: int) -> Dict:
 def panel_summary(request: Request, authorization: str = Header("")):
     c = _panel_clinic(request, authorization)
     db = _db(request)
+    since = int(time.time()) - 30 * 86400
     return {"clinica": c["nombre"], "conversaciones": db.list_conversations(c["id"]),
-            "solicitudes": db.list_requests(c["id"])}
+            "solicitudes": db.list_requests(c["id"]), "embudo_30d": db.clinic_funnel(c["id"], since)}
 
 
 @app.get("/api/panel/conversaciones/{conv_id}")

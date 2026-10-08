@@ -73,7 +73,7 @@ curl -X POST localhost:8000/api/dev/mensaje -H "Authorization: Bearer dev-admin"
 - Landing: <http://localhost:8000>
 - Ficha de alta para clínicas: <http://localhost:8000/alta>
 - Dashboard de administración: <http://localhost:8000/admin> (código: `ADMIN_TOKEN`)
-- Panel de recepción: <http://localhost:8000/panel> (código: el `panel_token` de la clínica)
+- Panel de recepción: <http://localhost:8000/panel> (código: el `panel_token` de la clínica). Muestra el embudo de los últimos 30 días: llamadas perdidas → WhatsApp enviados → respondieron → citas pedidas.
 
 Tests (con SQLite):
 
@@ -172,4 +172,3 @@ tests/           31 tests (lógica, HTTP, alta de clínicas)
 
 - Conectar la agenda (Google Calendar o el software de la clínica) como herramienta del agente.
 - Opt-in por tecla en la llamada de Twilio ("pulsa 1 si quieres que te escribamos").
-- Métricas en el panel: llamadas perdidas → mensajes → respuestas → solicitudes de cita.
