@@ -80,8 +80,11 @@ prometas lo que el producto no hace:**
   "en 15 segundos".
 - De noche **no** escribe: aplaza el mensaje a la franja permitida. No digas que atiende "fuera de horario".
 - La puesta en marcha depende de que Meta apruebe la plantilla de WhatsApp: no prometas plazos.
-- **No inventes precio ni prueba gratuita.** Si el usuario no los ha definido, ofrece solo una demo y
-  deja `[PRECIO]` o `[PRUEBA]` marcados.
+- **Precios (definidos por el usuario, los mismos que la landing):** primeras clínicas, **50 €/mes y 0 €
+  de instalación**; resto de clínicas, **150 € de instalación (pago único) + 50 €/mes**. Sin
+  permanencia. **No hay prueba gratuita definida: no la ofrezcas ni la inventes.** No digas cuántas
+  plazas quedan de "primeras clínicas" ni hasta cuándo dura, porque no está decidido. No hables de
+  IVA hasta que el usuario lo defina.
 - **No cites ni imites a un cliente concreto de una reseña.** Habla de "algunos pacientes comentan que
   cuesta contactar por teléfono".
 
@@ -108,8 +111,8 @@ confirme. ¿Os enseño una demo corta?
   dice y avisa a recepción para que responda. No confirma citas ni da consejos médicos.
 - **"¿Es difícil de instalar?"** La configuración la hacemos nosotros con los datos de la clínica; lo
   que puede tardar es la aprobación de la plantilla por parte de Meta. No des un plazo concreto.
-- **"¿Cuánto cuesta?"** Solo responde si el usuario ha definido precio. Si no, di que se lo explicas
-  en la demo.
+- **"¿Cuánto cuesta?"** Usa los precios de arriba. Si es de las primeras clínicas: 50 €/mes sin coste de
+  instalación. Si no: 150 € una sola vez de instalación y 50 € al mes de mantenimiento. Sin permanencia.
 
 ## Reglas
 - Solo datos de la **empresa**. No guardes nombres de autores de reseñas ni de profesionales.
