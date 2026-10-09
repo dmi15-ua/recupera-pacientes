@@ -135,3 +135,10 @@ def test_panel_funnel(client):
     f = r.json()["embudo_30d"]
     assert f["perdidas"] == 3 and f["enviados"] == 2 and f["respondieron"] == 1 and f["citas"] == 1
     assert client.get("/api/panel/resumen", headers={"Authorization": "Bearer panel-c2"}).json()["embudo_30d"]["perdidas"] == 0
+
+
+def test_health_muestra_el_commit(client, monkeypatch):
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "4c246740d844b4d756fc17d39d6b34c5d5861d28")
+    assert client.get("/salud").json() == {"ok": True, "commit": "4c24674"}
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA")
+    assert client.get("/salud").json() == {"ok": True, "commit": None}

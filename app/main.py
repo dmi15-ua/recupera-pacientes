@@ -111,7 +111,8 @@ def privacy_page():
 
 @app.get("/salud")
 def health():
-    return {"ok": True}
+    # Railway inyecta el commit desplegado: sirve para comprobar qué versión está corriendo.
+    return {"ok": True, "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7] or None}
 
 
 # ---------------------------------------------------------------- WhatsApp
