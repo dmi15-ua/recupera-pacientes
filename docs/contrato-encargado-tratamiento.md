@@ -1,19 +1,5 @@
 # Contrato de encargado del tratamiento (art. 28 RGPD)
 
-> **BORRADOR. No es asesoramiento jurídico.** Antes de firmarlo con ninguna clínica, que lo revise un
-> profesional (abogado o delegado de protección de datos). Todo lo que va entre `[corchetes]` hay que
-> completarlo o confirmarlo. Al final tienes la lista de puntos que revisar.
-
-En [ciudad], a [fecha].
-
-## Partes
-
-**Responsable del tratamiento** (la clínica): [razón social de la clínica], con NIF [NIF] y domicilio en
-[dirección]. Representada por [nombre y cargo]. En adelante, **la Clínica**.
-
-**Encargado del tratamiento**: [nombre o razón social], con NIF [NIF] y domicilio en [dirección].
-Contacto: [email]. En adelante, **el Encargado**.
-
 ## 1. Objeto
 
 La Clínica contrata los servicios de **RecuperaPacientes**: cuando un paciente llama a la clínica y no
