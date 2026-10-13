@@ -115,9 +115,15 @@ schema `rp_test`, que borran entero; nunca tocan `rp`.
      `{"to": "+34910000000", "from": "+34600111222", "id": "id-unico", "estado": "perdida"}`
      (o `"atendida"` para cancelar el mensaje si luego le cogen).
    - **Twilio**: compra un número, apunta su *Voice webhook* a `https://tu-dominio/webhooks/twilio/voz`,
-     pon `TWILIO_AUTH_TOKEN` y en la clínica `numeros_llamada` (el de Twilio) y `telefono_recepcion`
-     (al que se pasa la llamada). Twilio hace sonar recepción y, si nadie coge, avisa al paciente
-     de que le escribirán por WhatsApp.
+     pon `TWILIO_AUTH_TOKEN` y en la clínica `numeros_llamada` (el de Twilio). Hay dos modos, según el
+     campo `telefono_recepcion` de la clínica:
+     - **Con `telefono_recepcion`** (Twilio pasa la llamada): la clínica desvía **todas** sus llamadas al
+       número de Twilio, que hace sonar recepción durante `segundos_espera` y, si nadie coge, avisa al
+       paciente de que le escribirán por WhatsApp.
+     - **Sin `telefono_recepcion`** (modo desvío): la clínica desvía a Twilio **solo las llamadas que no
+       contesta** (desvío «si no contesta o está ocupado», que se activa con un código en el propio
+       teléfono). Cada llamada que llega a Twilio se da por perdida: se registra, el paciente oye el aviso
+       y se le escribe por WhatsApp. No pongas aquí el número de la propia clínica o la llamada daría vueltas.
 6. **Avisos**: crea un bot con @BotFather → `TELEGRAM_BOT_TOKEN`. Añádelo al grupo de recepción y pon
    el id del grupo en `telegram_chat_id` de la clínica. `OWNER_TELEGRAM_CHAT_ID` recibe los leads de la landing.
 7. **Privacidad**: completa `web/privacidad.html` y firma el contrato de encargado del tratamiento

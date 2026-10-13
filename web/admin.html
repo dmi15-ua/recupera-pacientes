@@ -442,7 +442,7 @@ async function editClinic(id){
 
   f.append(el('h3', '', 'Teléfonos'));
   field('Números a los que llaman los pacientes', 'numeros_llamada', (c.numeros_llamada || []).join(', '), {full: true, help: 'Separados por comas. Así se sabe de qué clínica es cada llamada perdida.'});
-  field('Teléfono de recepción (Twilio)', 'telefono_recepcion', c.telefono_recepcion, {help: 'Solo si usas Twilio: a dónde se pasa la llamada.'});
+  field('Teléfono de recepción (Twilio)', 'telefono_recepcion', c.telefono_recepcion, {help: 'Solo con Twilio. Con valor: Twilio pasa la llamada a este número y, si no la cogen, la da por perdida (la clínica desvía TODAS las llamadas a Twilio). Vacío: la clínica desvía a Twilio solo lo que no contesta y cada llamada que llega se da por perdida.'});
   field('Segundos sonando antes de darla por perdida', 'segundos_espera', c.segundos_espera ?? 20, {type: 'number'});
   field('Números bloqueados', 'bloqueados', (c.bloqueados || []).join(', '), {full: true, help: 'Proveedores, comerciales… nunca se les escribe.'});
 
