@@ -45,5 +45,10 @@ def twiml_say_and_hangup(text: str) -> str:
     return twiml(f'<Say language="es-ES">{escape(text)}</Say><Hangup/>')
 
 
+def twiml_reject_busy() -> str:
+    """Corta la llamada sin decir nada (el paciente oye tono de comunicando)."""
+    return twiml('<Reject reason="busy"/>')
+
+
 DEFAULT_MISSED_SAY = ("Ahora mismo no podemos atenderte. En unos minutos te escribiremos "
                       "por WhatsApp a este número para ayudarte. Gracias.")

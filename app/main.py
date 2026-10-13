@@ -215,7 +215,10 @@ async def twilio_voice(request: Request):
         # Modo desvío: la clínica solo desvía aquí lo que no contesta, así que cada llamada
         # que llega ya es una llamada perdida (no hay a quién pasarla).
         service.register_missed_call(db, clinic, p.get("From", ""), p.get("CallSid", ""))
-        return _xml(telephony.twiml_say_and_hangup(clinic.get("mensaje_voz", telephony.DEFAULT_MISSED_SAY)))
+        # Sin mensaje de voz configurado, la llamada se corta en silencio: al paciente solo le llega el WhatsApp.
+        if clinic.get("mensaje_voz"):
+            return _xml(telephony.twiml_say_and_hangup(clinic["mensaje_voz"]))
+        return _xml(telephony.twiml_reject_busy())
     return _xml(telephony.twiml_dial(clinic["telefono_recepcion"],
                                      settings.public_base_url + "/webhooks/twilio/fin",
                                      int(clinic.get("segundos_espera", 20))))

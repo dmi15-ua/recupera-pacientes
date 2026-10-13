@@ -122,7 +122,8 @@ schema `rp_test`, que borran entero; nunca tocan `rp`.
        paciente de que le escribirán por WhatsApp.
      - **Sin `telefono_recepcion`** (modo desvío): la clínica desvía a Twilio **solo las llamadas que no
        contesta** (desvío «si no contesta o está ocupado», que se activa con un código en el propio
-       teléfono). Cada llamada que llega a Twilio se da por perdida: se registra, el paciente oye el aviso
+       teléfono). Cada llamada que llega a Twilio se da por perdida: se registra, se corta en silencio
+       (el paciente oye tono de comunicando; si quieres que oiga un mensaje, ponlo en `mensaje_voz`)
        y se le escribe por WhatsApp. No pongas aquí el número de la propia clínica o la llamada daría vueltas.
 6. **Avisos**: crea un bot con @BotFather → `TELEGRAM_BOT_TOKEN`. Añádelo al grupo de recepción y pon
    el id del grupo en `telegram_chat_id` de la clínica. `OWNER_TELEGRAM_CHAT_ID` recibe los leads de la landing.

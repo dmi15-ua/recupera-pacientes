@@ -460,7 +460,7 @@ async function editClinic(id){
   f.append(el('h3', '', 'Lo que sabe el asistente'));
   field('Información de la clínica', 'informacion', c.informacion, {area: true, full: true, rows: 12, help: 'Servicios, precios, dirección, seguros… Es lo ÚNICO que el asistente puede afirmar.'});
   field('Instrucciones', 'instrucciones', c.instrucciones, {area: true, full: true, rows: 4});
-  field('Mensaje de voz (Twilio)', 'mensaje_voz', c.mensaje_voz, {full: true, placeholder: 'Por defecto: "Ahora mismo no podemos atenderte. En unos minutos te escribiremos por WhatsApp…"'});
+  field('Mensaje de voz (Twilio)', 'mensaje_voz', c.mensaje_voz, {full: true, placeholder: 'Vacío: en modo desvío la llamada se corta en silencio y solo llega el WhatsApp. Si pasas la llamada a recepción, por defecto: "Ahora mismo no podemos atenderte. En unos minutos te escribiremos por WhatsApp…"'});
   field('Chat de Telegram para avisos', 'telegram_chat_id', c.telegram_chat_id);
 
   const msg = el('div', 'err full');
