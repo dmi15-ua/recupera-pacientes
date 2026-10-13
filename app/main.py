@@ -207,9 +207,18 @@ def _xml(body: str) -> Response:
 @app.post("/webhooks/twilio/voz")
 async def twilio_voice(request: Request):
     p = await _twilio_params(request)
-    clinic = _db(request).clinic_by_called_number(normalize(p.get("To")))
-    if not clinic or not clinic.get("telefono_recepcion"):
+    db = _db(request)
+    clinic = db.clinic_by_called_number(normalize(p.get("To")))
+    if not clinic:
         return _xml(telephony.twiml_say_and_hangup("Este número no está disponible."))
+    if not clinic.get("telefono_recepcion"):
+        # Modo desvío: la clínica solo desvía aquí lo que no contesta, así que cada llamada
+        # que llega ya es una llamada perdida (no hay a quién pasarla).
+        service.register_missed_call(db, clinic, p.get("From", ""), p.get("CallSid", ""))
+        # Sin mensaje de voz configurado, la llamada se corta en silencio: al paciente solo le llega el WhatsApp.
+        if clinic.get("mensaje_voz"):
+            return _xml(telephony.twiml_say_and_hangup(clinic["mensaje_voz"]))
+        return _xml(telephony.twiml_reject_busy())
     return _xml(telephony.twiml_dial(clinic["telefono_recepcion"],
                                      settings.public_base_url + "/webhooks/twilio/fin",
                                      int(clinic.get("segundos_espera", 20))))

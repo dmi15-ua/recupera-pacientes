@@ -83,6 +83,32 @@ def test_twilio_voice_dials_reception(client):
     assert "<Dial" in r.text and "+34910000001" in r.text
 
 
+def test_twilio_voice_modo_desvio_registra_llamada_perdida(client):
+    # Clínica sin teléfono de recepción: solo le desvían lo que no contesta.
+    sin_recepcion = {k: v for k, v in CLINIC.items() if k != "telefono_recepcion"}
+    app.state.db.upsert_clinic({**sin_recepcion, "id": "c3", "nombre": "Solo desvío",
+                                "numeros_llamada": ["+34930000000"], "panel_token": "panel-c3"})
+    url = "https://test.local/webhooks/twilio/voz"
+    params = {"From": "+34600888777", "To": "+34930000000", "CallSid": "CA9"}
+    r = client.post("/webhooks/twilio/voz", data=params, headers={"X-Twilio-Signature": twilio_sign(url, params)})
+    # Sin mensaje de voz: se corta en silencio y solo llega el WhatsApp.
+    assert "<Dial" not in r.text and "<Say" not in r.text and "<Reject" in r.text
+    row = app.state.db._one("SELECT * FROM {T}missed_calls WHERE call_ref = 'CA9'")
+    assert row["phone"] == "+34600888777" and row["clinic_id"] == "c3"
+    # Con mensaje de voz configurado, se dice y se cuelga.
+    app.state.db.upsert_clinic({**sin_recepcion, "id": "c3", "nombre": "Solo desvío",
+                                "numeros_llamada": ["+34930000000"], "panel_token": "panel-c3",
+                                "mensaje_voz": "Te escribimos por WhatsApp."})
+    params = {"From": "+34600888111", "To": "+34930000000", "CallSid": "CA11"}
+    r = client.post("/webhooks/twilio/voz", data=params, headers={"X-Twilio-Signature": twilio_sign(url, params)})
+    assert "Te escribimos por WhatsApp." in r.text and "<Hangup" in r.text
+    # Número que no es de ninguna clínica: sigue sin estar disponible.
+    params = {"From": "+34600888777", "To": "+34999999998", "CallSid": "CA10"}
+    r = client.post("/webhooks/twilio/voz", data=params, headers={"X-Twilio-Signature": twilio_sign(url, params)})
+    assert "no está disponible" in r.text
+    assert app.state.db._one("SELECT * FROM {T}missed_calls WHERE call_ref = 'CA10'") is None
+
+
 def test_lead_form(client):
     base = {"clinica": "Clínica X", "telefono": "600123123", "acepta": True}
     assert client.post("/api/leads", json={**base, "acepta": False}).status_code == 400
